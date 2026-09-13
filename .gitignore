@@ -1,4 +1,12 @@
 .python-version
 
 venv/
+.venv/
 _data/
+_local/
+
+__pycache__/
+*.pyc
+
+.ipynb_checkpoints/
+.marimo.toml
