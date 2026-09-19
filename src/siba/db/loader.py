@@ -6,6 +6,7 @@ import datetime as dt
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import config, schema, sources
@@ -73,7 +74,7 @@ def build_nappe_pluie_daily(con):
     for p in config.PIEZOMETERS:
         sub = nappe[nappe["code_bss"] == p["code_bss"]]
         if sub.empty:
-            out[p["col"]] = pd.NA
+            out[p["col"]] = pd.Series(np.nan, index=idx, dtype="float64")
             continue
         ts = sub.set_index(pd.to_datetime(sub["date_mesure"]))["profondeur_nappe"]
         ts = ts[~ts.index.duplicated(keep="last")]
@@ -82,9 +83,9 @@ def build_nappe_pluie_daily(con):
 
     # Pluie : fenêtres calculées sur la série complète Cap-Ferret, puis découpe.
     if meteo.empty:
-        out["rr"] = pd.NA
+        out["rr"] = pd.Series(np.nan, index=idx, dtype="float64")
         for w in config.RAIN_WINDOWS:
-            out[f"rr_{w}d"] = pd.NA
+            out[f"rr_{w}d"] = pd.Series(np.nan, index=idx, dtype="float64")
     else:
         rr_full = meteo.set_index(pd.to_datetime(meteo["date"]))["rr"].sort_index()
         rr_full = rr_full[~rr_full.index.duplicated(keep="last")]
@@ -97,9 +98,15 @@ def build_nappe_pluie_daily(con):
 
     out = out.reset_index()
 
+    # Cast `date` to a real DATE in the materialized table (a datetime64 index
+    # otherwise lands as TIMESTAMP); the returned DataFrame keeps Timestamps.
+    select_cols = ", ".join(
+        'CAST("date" AS DATE) AS "date"' if c == "date" else f'"{c}"'
+        for c in out.columns
+    )
     con.execute("DROP TABLE IF EXISTS nappe_pluie_daily")
     con.register("_daily_df", out)
-    con.execute("CREATE TABLE nappe_pluie_daily AS SELECT * FROM _daily_df")
+    con.execute(f"CREATE TABLE nappe_pluie_daily AS SELECT {select_cols} FROM _daily_df")
     con.unregister("_daily_df")
     return out
 

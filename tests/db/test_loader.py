@@ -109,6 +109,24 @@ def test_nappe_interpolation_limit(tmp_path):
     con.close()
 
 
+def test_empty_build_has_stable_column_types(tmp_path):
+    # An empty DB must still produce DOUBLE value columns and a DATE date column,
+    # not INTEGER/TIMESTAMP from scalar pd.NA fills and a datetime64 index.
+    con = _con(tmp_path)
+    loader.build_nappe_pluie_daily(con)
+    types = {
+        r[1]: r[2]
+        for r in con.execute("PRAGMA table_info('nappe_pluie_daily')").fetchall()
+    }
+    assert types["date"] == "DATE"
+    assert types["rr"] == "DOUBLE"
+    for w in config.RAIN_WINDOWS:
+        assert types[f"rr_{w}d"] == "DOUBLE"
+    for p in config.PIEZOMETERS:
+        assert types[p["col"]] == "DOUBLE"
+    con.close()
+
+
 def test_build_creates_table(tmp_path):
     con = _con(tmp_path)
     _seed_meteo_range(con, config.DAILY_START, 10)
