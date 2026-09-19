@@ -1,0 +1,137 @@
+# Événements réseau EU / coquillages — Bassin d'Arcachon
+#
+# Données curées à la main (source de vérité pour la base DuckDB).
+# Extraites de notebooks/analyse_nappe_pluie_historique.ipynb.
+#
+# verified = true  → date confirmée par arrêté préfectoral / constat OFB officiel
+# verified = false → date estimée / rapportée (presse, lanceurs d'alerte)
+
+# ---------------------------------------------------------------------------
+# Périodes « hors de contrôle » (HC) du réseau eaux usées (EU)
+# ---------------------------------------------------------------------------
+
+[[hc_period]]
+start = 2014-01-24
+end = 2014-03-12
+label = "HC 2014 (hiver — dates approx.)"
+communes = ["Bassin d'Arcachon (général)"]
+cause = "Saturation réseau EU par pluies hivernales"
+source = "D Lafon"
+verified = true
+
+[[hc_period]]
+start = 2016-01-05
+end = 2016-01-14
+label = "HC Janv 2016 (hiver — dates approx.)"
+communes = ["Bassin d'Arcachon (général)"]
+cause = "Saturation réseau EU par pluies hivernales"
+source = "D Lafon"
+verified = true
+
+[[hc_period]]
+start = 2016-02-09
+end = 2016-02-17
+label = "HC Fev 2016 (hiver — dates approx.)"
+communes = ["Bassin d'Arcachon (général)"]
+cause = "Saturation réseau EU par pluies hivernales"
+source = "D Lafon"
+verified = true
+
+[[hc_period]]
+start = 2016-03-04
+end = 2016-03-11
+label = "HC Mars 2016 (hiver — dates approx.)"
+communes = ["Bassin d'Arcachon (général)"]
+cause = "Saturation réseau EU par pluies hivernales"
+source = "D Lafon"
+verified = true
+
+[[hc_period]]
+start = 2020-11-01
+end = 2020-12-31
+label = "HC 2020 (hiver — dates approx.)"
+communes = ["Bassin d'Arcachon (général)"]
+cause = "Saturation réseau EU par pluies hivernales — norovirus signalé"
+source = "Ostréiculteurs / CRCAA (mention rétrospective)"
+verified = false
+
+[[hc_period]]
+start = 2021-02-08
+end = 2021-03-15
+label = "HC 2021 (fév.→mars)"
+communes = ["Bassin d'Arcachon (général)"]
+cause = "Intempéries hivernales — saturation réseau — norovirus"
+source = "France Bleu Gironde / AP préfectoral ~18 fév. 2021"
+verified = true
+
+[[hc_period]]
+start = 2023-11-10
+end = 2023-12-31
+label = "HC 2023 (15/10→31/12)"
+communes = ["Andernos", "Lanton", "Arès", "Gujan-Mestras", "La Teste", "Audenge"]
+cause = "24 j consécutifs de pluie (18 mm/j moy.) ; bassin Titoune déborde vers ruisseau Masurat → Bassin"
+source = "ADEBA / Le Bétey / Préfecture Gironde"
+verified = true
+
+[[hc_period]]
+start = 2024-02-22
+end = 2024-04-01
+label = "HC 2024 (22/02→01/04)"
+communes = ["Lanton", "Taussat", "Andernos", "Arès", "Gujan-Mestras", "La Teste"]
+cause = "surverses littorales constatées par l'OFB le 1er avril 2024"
+source = "Rapport annuel SB2A/SIBA 2024 · OFB · Le Bétey"
+verified = true
+
+[[hc_period]]
+start = 2026-01-21
+end = 2026-02-25
+label = "HC 2026 (21/01→25/02)"
+communes = ["Lanton", "Taussat"]
+cause = "Janv. 2026 : +55 % pluie vs normale (15e mois le plus pluvieux depuis 1949) ; nappes hautes ; bassins de sécu pleins ; débordements station de relevage Taussat constatés le 5 fév. 2026"
+source = "AFP / France Bleu Gironde / La Gazette France (fév. 2026)"
+verified = true
+
+# ---------------------------------------------------------------------------
+# Périodes d'interdiction préfectorale (pêche / commercialisation coquillages)
+# Bassin d'Arcachon + Banc d'Arguin
+# ---------------------------------------------------------------------------
+
+[[interdiction_period]]
+start = 2020-11-01
+end = 2020-12-15
+label = "Interdiction 2020 (hiver — dates approx.)"
+especes = ["huîtres", "coquillages"]
+cause = "Norovirus (origine EU)"
+peche_loisir = true
+source = "Mention rétrospective CRCAA / ostréiculteurs"
+verified = false
+
+[[interdiction_period]]
+start = 2021-02-18
+end = 2021-03-18
+label = "Interdiction 2021 (18/02→~18/03)"
+especes = ["huîtres", "coques", "moules", "pétoncles"]
+cause = "Norovirus (origine EU) — toxi-infections collectives"
+peche_loisir = true
+source = "France Bleu Gironde — AP préfectoral ~18 fév. 2021"
+verified = true
+
+[[interdiction_period]]
+start = 2023-05-17
+end = 2023-06-15
+label = "Interdiction 2023 mai (17/05→~mi-juin) — toxines algales"
+especes = ["moules", "palourdes", "coques"]
+cause = "Toxines lipophiles (Dinophysis) — PAS lié aux EU"
+peche_loisir = true
+source = "Préfecture Gironde — AP 17/05/2023 (site officiel)"
+verified = true
+
+[[interdiction_period]]
+start = 2023-12-27
+end = 2024-01-19
+label = "Interdiction 2023-2024 (27/12→19/01) ⚠ CRISE MAJEURE"
+especes = ["huîtres", "palourdes", "moules", "coques", "tous coquillages Bassin + Banc d'Arguin"]
+cause = "Norovirus (origine EU) — épidémie gastro-entérite 25-26 déc. 2023 ; surverses massives réseau SIBA"
+peche_loisir = true
+source = "AP préfectoral 27/12/2023 · Levée AP 18/01/2024 (Préfecture Gironde)"
+verified = true

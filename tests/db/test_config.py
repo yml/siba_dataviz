@@ -1,6 +1,16 @@
+import tomllib
 from pathlib import Path
 
 from siba.db import config
+
+
+def test_events_toml_fixture_ships_and_parses():
+    assert config.EVENTS_TOML.exists()
+    assert isinstance(config.EVENTS_TOML, Path)
+    with open(config.EVENTS_TOML, "rb") as f:
+        data = tomllib.load(f)
+    assert len(data["hc_period"]) == 9
+    assert len(data["interdiction_period"]) == 4
 
 
 def test_db_path_under_data_dir():

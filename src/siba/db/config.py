@@ -1,9 +1,14 @@
 """Constantes du flux DuckDB : chemins, stations, URLs, fenêtres."""
 
+from pathlib import Path
+
 from siba.paths import DATA_DIR
 
 #: Base DuckDB (respecte SIBA_DATA_DIR via DATA_DIR).
 DB_PATH = DATA_DIR / "siba.duckdb"
+
+#: Fixture TOML des événements curés (HC réseau EU + interdictions coquillages).
+EVENTS_TOML = Path(__file__).parent / "fixtures" / "events.toml"
 
 #: API chroniques piézométriques Hub'eau.
 HUBEAU_URL = "https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques.json"
