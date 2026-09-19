@@ -72,16 +72,22 @@ plutôt que de renvoyer un résultat vide.
 
 ## Base DuckDB (`siba.db`)
 
-Nouveau flux : chargement direct depuis Hub'eau et Météo-France dans une base
-DuckDB locale `_data/siba.duckdb`, indépendant du cache CSV.
+Chargement des données directement depuis Hub'eau et Météo-France vers une base
+DuckDB locale `_data/siba.duckdb`, sans passer par le cache CSV.
 
 ```sh
 # reconstruire la base de zéro
 uv run python -m siba.db rebuild
 
-# mise à jour incrémentale (année en cours + fichier météo « latest »)
+# mise à jour incrémentale (année précédente + courante, fichier météo « latest »)
 uv run python -m siba.db update
 ```
+
+`rebuild` charge la nappe de 2010 à l'année en cours et les fichiers
+Météo-France `previous` (1950-2024) + `latest`. L'archive Météo-France
+antérieure à 1950 n'est volontairement pas chargée (la table journalière
+démarre en 2015). `update` ne recharge que l'année précédente et l'année en
+cours (Hub'eau) et le fichier `latest` (Météo-France).
 
 Tables : `nappe_mesure`, `meteo_jour` (toutes stations Gironde, colonnes
 brutes), `station`, `ingest_log`. Vues/dérivés : `v_meteo_interest` (stations
