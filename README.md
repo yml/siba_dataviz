@@ -70,6 +70,24 @@ Passer `max_age_hours=0` force le rechargement, `float("inf")` fige le cache
 (utile hors ligne). Si la source est injoignable, le cache existant est relu
 plutôt que de renvoyer un résultat vide.
 
+## Base DuckDB (`siba.db`)
+
+Nouveau flux : chargement direct depuis Hub'eau et Météo-France dans une base
+DuckDB locale `_data/siba.duckdb`, indépendant du cache CSV.
+
+```sh
+# reconstruire la base de zéro
+uv run python -m siba.db rebuild
+
+# mise à jour incrémentale (année en cours + fichier météo « latest »)
+uv run python -m siba.db update
+```
+
+Tables : `nappe_mesure`, `meteo_jour` (toutes stations Gironde, colonnes
+brutes), `station`, `ingest_log`. Vues/dérivés : `v_meteo_interest` (stations
+d'intérêt), `nappe_pluie_daily` (table matérialisée : nappes interpolées +
+cumuls de pluie 7/14/28/56 j sur Cap-Ferret).
+
 ## Notebooks
 
 | Notebook | Contenu |
