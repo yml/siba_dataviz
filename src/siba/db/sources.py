@@ -110,3 +110,18 @@ def download_meteo_file(url: str, dest_dir) -> Path:
         raw_path.unlink(missing_ok=True)
         return csv_path
     return raw_path
+
+
+def download_meteo_descriptor(dest_path) -> Path:
+    """Télécharge le descriptif officiel des champs Météo-France dans *dest_path*."""
+    dest_path = Path(dest_path)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with requests.get(
+        config.METEO_DESCRIPTOR_URL, stream=True, timeout=60, allow_redirects=True
+    ) as resp:
+        resp.raise_for_status()
+        with open(dest_path, "wb") as out:
+            for chunk in resp.iter_content(chunk_size=1 << 16):
+                if chunk:
+                    out.write(chunk)
+    return dest_path

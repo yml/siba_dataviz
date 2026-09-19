@@ -44,6 +44,9 @@ METEO_URLS = {
     "latest": "https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50",
 }
 
+#: Descriptif officiel des champs Météo-France (mis en cache dans _data au rebuild).
+METEO_DESCRIPTOR_URL = "https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv"
+
 #: Fenêtres glissantes de cumul de pluie (jours).
 RAIN_WINDOWS = [7, 14, 28, 56]
 

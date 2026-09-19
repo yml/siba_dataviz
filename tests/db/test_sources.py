@@ -96,6 +96,34 @@ def test_download_meteo_file_gunzips(tmp_path, monkeypatch):
     assert out.read_bytes() == payload
 
 
+def test_download_meteo_descriptor_writes_file(tmp_path, monkeypatch):
+    payload = b"NOM_CHAMP;DESCRIPTION\nRR;precipitation en 24h\n"
+
+    class _Resp:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def iter_content(self, chunk_size=1):
+            yield payload
+
+        def raise_for_status(self):
+            pass
+
+    def _fake_get(url, stream=False, timeout=None, allow_redirects=True):
+        return _Resp()
+
+    monkeypatch.setattr(sources.requests, "get", _fake_get)
+    dest = tmp_path / "Q_descriptif_champs_RR-T-Vent.csv"
+    out = sources.download_meteo_descriptor(dest)
+    assert out == dest
+    assert dest.read_bytes() == payload
+
+
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch):
     """Neutralise les back-off/délais réseau pour garder les tests rapides."""

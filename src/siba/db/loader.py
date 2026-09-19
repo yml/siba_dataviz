@@ -288,6 +288,14 @@ def rebuild(db_path=None) -> None:
         except Exception:
             con.execute("ROLLBACK")
             raise
+        # Rafraîchit le descriptif officiel des champs météo (best-effort : un
+        # échec réseau ne casse pas le rebuild, la base est déjà committée).
+        try:
+            descriptor = config.DATA_DIR / "Q_descriptif_champs_RR-T-Vent.csv"
+            sources.download_meteo_descriptor(descriptor)
+            print(f"Descriptif Météo-France mis en cache : {descriptor}")
+        except Exception as exc:
+            print(f"Avertissement : descriptif Météo-France non mis à jour ({exc})")
         print(format_summary(con, "rebuild"))
     finally:
         con.close()
