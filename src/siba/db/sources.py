@@ -19,6 +19,30 @@ _NAPPE_COLS = [
 ]
 
 
+def _get_with_retry(sess, url, params):
+    """GET Hub'eau avec tentatives sur timeout / HTTP 429 / 5xx.
+
+    Renvoie la réponse pour un statut non-réessayable (2xx ou 4xx) ; lève la
+    dernière erreur si toutes les tentatives réessayables sont épuisées.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(config.NAPPE_MAX_RETRIES):
+        try:
+            resp = sess.get(url, params=params, timeout=30)
+        except requests.exceptions.Timeout as exc:
+            last_exc = exc
+            time.sleep(config.NAPPE_BACKOFF * (attempt + 1))
+            continue
+        if resp.status_code == 429 or 500 <= resp.status_code < 600:
+            last_exc = RuntimeError(
+                f"Hub'eau HTTP {resp.status_code} (tentative {attempt + 1})"
+            )
+            time.sleep(config.NAPPE_BACKOFF * (attempt + 1))
+            continue
+        return resp
+    raise last_exc
+
+
 def fetch_nappe_year(
     code_bss: str,
     year: int,
@@ -43,7 +67,7 @@ def fetch_nappe_year(
             "date_debut_mesure": f"{year}-01-01",
             "date_fin_mesure": f"{year}-12-31",
         }
-        resp = sess.get(url, params=params, timeout=30)
+        resp = _get_with_retry(sess, url, params)
         if resp.status_code not in (200, 206):
             break
         data = resp.json()

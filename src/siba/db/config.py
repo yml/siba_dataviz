@@ -50,6 +50,15 @@ RAIN_WINDOWS = [7, 14, 28, 56]
 #: Limite d'interpolation temporelle des nappes (jours).
 INTERP_LIMIT = 3
 
+#: Robustesse Hub'eau : nombre de tentatives et back-off (s) de base sur
+#: timeout / HTTP 429 / 5xx.
+NAPPE_MAX_RETRIES = 3
+NAPPE_BACKOFF = 1.0
+
+#: Délai (s) entre deux requêtes annuelles Hub'eau, pour éviter le throttling
+#: lors d'un rebuild qui enchaîne les années. Mis à 0 dans les tests.
+NAPPE_REQUEST_DELAY = 1.0
+
 #: En-tête brut complet des fichiers Q_33_*_RR-T-Vent (60 colonnes).
 METEO_COLUMNS = [
     "NUM_POSTE", "NOM_USUEL", "LAT", "LON", "ALTI", "AAAAMMJJ",

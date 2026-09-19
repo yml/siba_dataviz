@@ -1,6 +1,8 @@
 import pandas as pd
+import pytest
+import requests
 
-from siba.db import sources
+from siba.db import config, sources
 
 NAPPE_COLS = [
     "code_bss", "date_mesure", "niveau_nappe_eau", "profondeur_nappe",
@@ -103,3 +105,48 @@ def test_download_meteo_file_gunzips(tmp_path, monkeypatch):
     out = sources.download_meteo_file("https://data.gouv/whatever", tmp_path)
     assert out.suffix == ".csv"
     assert out.read_bytes() == payload
+
+
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch):
+    """Neutralise les back-off/délais réseau pour garder les tests rapides."""
+    monkeypatch.setattr(sources.time, "sleep", lambda *_a, **_k: None)
+
+
+class _TimeoutThenOk:
+    """Timeout au 1er appel, données ensuite (transient network hiccup)."""
+
+    def __init__(self, records):
+        self.records = records
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        if self.calls == 1:
+            raise requests.exceptions.Timeout("boom")
+        return _FakeResp({"data": self.records, "next": None})
+
+
+class _AlwaysStatus:
+    def __init__(self, status):
+        self.status = status
+        self.calls = 0
+
+    def get(self, url, params=None, timeout=None):
+        self.calls += 1
+        return _FakeResp({}, status=self.status)
+
+
+def test_fetch_nappe_year_retries_on_timeout():
+    rec = {"code_bss": "A/F", "date_mesure": "2024-01-01", "profondeur_nappe": 1.0}
+    sess = _TimeoutThenOk([rec])
+    df = sources.fetch_nappe_year("A/F", 2024, session=sess)
+    assert len(df) == 1
+    assert sess.calls == 2  # retried after the first timeout
+
+
+def test_fetch_nappe_year_raises_on_persistent_5xx():
+    sess = _AlwaysStatus(500)
+    with pytest.raises(Exception):
+        sources.fetch_nappe_year("A/F", 2024, session=sess)
+    assert sess.calls == config.NAPPE_MAX_RETRIES  # retried, then gave up

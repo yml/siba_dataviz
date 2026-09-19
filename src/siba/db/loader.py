@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,8 @@ def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year) -> int:
             total += schema.upsert_dataframe(
                 con, "nappe_mesure", df, keys=["code_bss", "date_mesure"]
             )
+            # Espace les requêtes pour éviter le throttling Hub'eau en rebuild.
+            time.sleep(config.NAPPE_REQUEST_DELAY)
     return total
 
 

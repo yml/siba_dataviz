@@ -21,7 +21,8 @@ def _fake_nappe(code_bss, year, **kwargs):
     })
 
 
-def test_load_nappe_upserts_all_piezos(tmp_path):
+def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     con = _con(tmp_path)
     n = loader._load_nappe(con, [2024], fetch=_fake_nappe)
     assert n == len(config.PIEZOMETERS)
