@@ -1,4 +1,16 @@
+import pytest
+
 from siba.db import cli
+
+
+def test_db_path_before_subcommand_is_not_silently_ignored(monkeypatch):
+    # Regression: `siba-db --db-path X rebuild` used to run rebuild(db_path=None)
+    # and wipe the default DB. With --db-path declared only on the subparsers,
+    # the pre-subcommand form must fail loudly instead of silently mis-targeting.
+    monkeypatch.setattr(cli.loader, "update", lambda db_path=None: None)
+    monkeypatch.setattr(cli.loader, "rebuild", lambda db_path=None: None)
+    with pytest.raises(SystemExit):
+        cli.main(["--db-path", "/tmp/x.duckdb", "rebuild"])
 
 
 def test_update_is_default(monkeypatch):

@@ -8,17 +8,22 @@ from . import loader
 
 
 def main(argv: list[str] | None = None) -> int:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--db-path", default=None, help="Chemin de la base DuckDB.")
-
     parser = argparse.ArgumentParser(
         prog="siba-db",
         description="Chargement DuckDB nappes + pluie.",
-        parents=[common],
     )
+    # --db-path is declared in exactly one place (the subparsers). The root
+    # only carries a default so args.db_path exists when no subcommand is given
+    # (bare `siba-db` == update). Putting the flag on both parsers made the
+    # subparser default silently clobber a pre-subcommand value.
+    parser.set_defaults(db_path=None)
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("update", parents=[common], help="Mise à jour incrémentale (défaut).")
-    sub.add_parser("rebuild", parents=[common], help="Reconstruction complète.")
+    for name, help_text in (
+        ("update", "Mise à jour incrémentale (défaut)."),
+        ("rebuild", "Reconstruction complète."),
+    ):
+        sp = sub.add_parser(name, help=help_text)
+        sp.add_argument("--db-path", default=None, help="Chemin de la base DuckDB.")
 
     args = parser.parse_args(argv)
     if args.command == "rebuild":
