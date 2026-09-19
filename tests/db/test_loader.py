@@ -50,6 +50,48 @@ def test_update_prints_start_and_build_lines(tmp_path, monkeypatch, capsys):
     con.close()
 
 
+def _run_update_with_fakes(dbp, monkeypatch, meteo_csv):
+    """Run a real update() but with fake network (nappe fetch + meteo download)."""
+    monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
+    real_nappe = loader._load_nappe
+    real_meteo = loader._load_meteo
+    monkeypatch.setattr(
+        loader, "_load_nappe",
+        lambda con, years, **kw: real_nappe(con, years, fetch=_fake_nappe),
+    )
+    monkeypatch.setattr(
+        loader, "_load_meteo",
+        lambda con, keys, **kw: real_meteo(con, keys, download=_copy_download(meteo_csv)),
+    )
+    loader.update(db_path=dbp)
+
+
+def test_format_summary_reports_counts_and_ranges(tmp_path, monkeypatch, meteo_csv):
+    dbp = tmp_path / "s.duckdb"
+    _run_update_with_fakes(dbp, monkeypatch, meteo_csv)
+    con = schema.connect(dbp)
+    s = loader.format_summary(con, "update")
+    con.close()
+    # mode + all three table names + their counts (4 nappe rows, 3 meteo rows)
+    assert "update" in s
+    assert "nappe_mesure=4" in s
+    assert "meteo_jour=3" in s
+    assert "nappe_pluie_daily=" in s
+    # ingest_log rows from this run, with a date range arrow
+    assert "hubeau" in s
+    assert "meteofrance" in s
+    assert "→" in s
+
+
+def test_update_prints_summary(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(loader, "_load_nappe", lambda con, years, **kw: (0, None, None))
+    monkeypatch.setattr(loader, "_load_meteo", lambda con, keys, **kw: (0, None, None))
+    loader.update(db_path=tmp_path / "p.duckdb")
+    out = capsys.readouterr().out
+    assert "Résumé" in out
+    assert "nappe_mesure=" in out
+
+
 def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     con = _con(tmp_path)

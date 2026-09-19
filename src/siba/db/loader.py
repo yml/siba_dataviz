@@ -193,6 +193,45 @@ def _enrich_stations(con) -> None:
     )
 
 
+def format_summary(con, mode: str) -> str:
+    """Bloc de résumé (chaîne pure, testable) lu depuis la base après chargement.
+
+    Reprend, pour le chargement courant : les lignes ``ingest_log`` de ce run
+    (source, scope, lignes, plage de dates), les comptes des tables de faits +
+    dérivée, le nombre de stations météo distinctes et l'étendue de
+    ``nappe_pluie_daily``.
+    """
+    lines = [f"Résumé ({mode}) :"]
+    # Lignes ingest_log de CE run : la fenêtre récente (les deux _log d'un run
+    # sont écrits en rafale ; le run précédent est distant de plusieurs secondes).
+    log_rows = con.execute(
+        """
+        WITH latest AS (SELECT MAX(fetched_at) AS m FROM ingest_log WHERE mode = ?)
+        SELECT source, scope, rows_upserted, date_min, date_max
+        FROM ingest_log, latest
+        WHERE mode = ? AND fetched_at >= latest.m - INTERVAL 10 SECOND
+        ORDER BY source
+        """,
+        [mode, mode],
+    ).fetchall()
+    for source, scope, rows, dmin, dmax in log_rows:
+        lines.append(f"  {source:<12} {scope:<20} {rows:>9} lignes  {dmin} → {dmax}")
+
+    counts = {
+        t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        for t in ("nappe_mesure", "meteo_jour", "nappe_pluie_daily")
+    }
+    n_stations = con.execute('SELECT COUNT(DISTINCT "NUM_POSTE") FROM meteo_jour').fetchone()[0]
+    span = con.execute("SELECT MIN(date), MAX(date) FROM nappe_pluie_daily").fetchone()
+    lines.append(
+        f"  Tables : nappe_mesure={counts['nappe_mesure']}  "
+        f"meteo_jour={counts['meteo_jour']} ({n_stations} stations)  "
+        f"nappe_pluie_daily={counts['nappe_pluie_daily']}"
+    )
+    lines.append(f"  nappe_pluie_daily : {span[0]} → {span[1]}")
+    return "\n".join(lines)
+
+
 def _log(con, source, scope, mode, rows, date_min=None, date_max=None) -> None:
     con.execute(
         "INSERT INTO ingest_log (source, scope, mode, rows_upserted, "
@@ -219,6 +258,7 @@ def update(db_path=None) -> None:
         build_nappe_pluie_daily(con)
         _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
         _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
+        print(format_summary(con, "update"))
     finally:
         con.close()
 
@@ -248,5 +288,6 @@ def rebuild(db_path=None) -> None:
         except Exception:
             con.execute("ROLLBACK")
             raise
+        print(format_summary(con, "rebuild"))
     finally:
         con.close()
