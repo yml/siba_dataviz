@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import tempfile
 import time
+import tomllib
 
 import numpy as np
 import pandas as pd
@@ -103,6 +104,46 @@ def _load_meteo(con, url_keys, *, download=sources.download_meteo_file):
             print(f"Météo-France  fichier {key} … {n} lignes")
             dmin, dmax = _span(dmin, dmax, lo, hi)
     return total, dmin, dmax
+
+
+def _load_events(con):
+    """Remplace intégralement les tables d'événements depuis la fixture TOML.
+
+    Les listes Python (``communes`` / ``especes``) sont insérées directement
+    dans les colonnes VARCHAR[] ; les dates TOML sont des ``datetime.date``.
+    Renvoie ``(n_hc, n_interdiction)``.
+    """
+    with open(config.EVENTS_TOML, "rb") as f:
+        data = tomllib.load(f)
+
+    hc = data.get("hc_period", [])
+    con.execute("DELETE FROM hc_period")
+    if hc:
+        con.executemany(
+            "INSERT INTO hc_period "
+            "(start_date, end_date, label, communes, cause, source, verified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (e["start"], e["end"], e["label"], e["communes"],
+                 e["cause"], e["source"], e["verified"])
+                for e in hc
+            ],
+        )
+
+    it = data.get("interdiction_period", [])
+    con.execute("DELETE FROM interdiction_period")
+    if it:
+        con.executemany(
+            "INSERT INTO interdiction_period "
+            "(start_date, end_date, label, especes, cause, source, verified, peche_loisir) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (e["start"], e["end"], e["label"], e["especes"],
+                 e["cause"], e["source"], e["verified"], e["peche_loisir"])
+                for e in it
+            ],
+        )
+    return len(hc), len(it)
 
 
 def build_nappe_pluie_daily(con):
@@ -252,6 +293,7 @@ def update(db_path=None) -> None:
         try:
             schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
             schema.seed_stations(con)
+            _load_events(con)
             year = dt.date.today().year
             # Prev + current year: a January run still picks up late-December points
             # and prior-year requalifications; the upsert absorbs the overlap.
@@ -261,6 +303,7 @@ def update(db_path=None) -> None:
             _enrich_stations(con)
             print("Construction de nappe_pluie_daily …")
             build_nappe_pluie_daily(con)
+            schema.create_event_views(con)
             _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
             _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
             con.execute("COMMIT")
@@ -285,12 +328,14 @@ def rebuild(db_path=None) -> None:
             schema.drop_all(con)
             schema.create_all(con)
             schema.seed_stations(con)
+            _load_events(con)
             years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
             n_nappe, nmin, nmax = _load_nappe(con, years)
             n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
             _enrich_stations(con)
             print("Construction de nappe_pluie_daily …")
             build_nappe_pluie_daily(con)
+            schema.create_event_views(con)
             _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe, nmin, nmax)
             _log(con, "meteofrance", "meteo all", "rebuild", n_meteo, mmin, mmax)
             con.execute("COMMIT")

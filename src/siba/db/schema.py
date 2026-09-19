@@ -119,7 +119,27 @@ def create_all(con: duckdb.DuckDBPyConnection) -> None:
     )
 
 
+def create_event_views(con: duckdb.DuckDBPyConnection) -> None:
+    """Vue quotidienne combinant nappe/pluie et drapeaux d'événements.
+
+    Dépend de ``nappe_pluie_daily`` et des tables d'événements : à créer APRÈS
+    ``build_nappe_pluie_daily`` et ``_load_events``.
+    """
+    con.execute(
+        """
+        CREATE OR REPLACE VIEW v_nappe_pluie_events AS
+        SELECT d.*,
+          EXISTS (SELECT 1 FROM hc_period h
+                  WHERE d.date BETWEEN h.start_date AND h.end_date)          AS in_hc,
+          EXISTS (SELECT 1 FROM interdiction_period i
+                  WHERE d.date BETWEEN i.start_date AND i.end_date)          AS in_interdiction
+        FROM nappe_pluie_daily d
+        """
+    )
+
+
 def drop_all(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute("DROP VIEW IF EXISTS v_nappe_pluie_events")
     con.execute("DROP VIEW IF EXISTS v_meteo_interest")
     for t in (
         "ingest_log", "meteo_jour", "nappe_mesure", "station", "nappe_pluie_daily",

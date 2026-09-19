@@ -251,6 +251,68 @@ def test_build_creates_table(tmp_path):
     con.close()
 
 
+def _seed_meteo_on_dates(con, dates):
+    df = pd.DataFrame({c: pd.NA for c in config.METEO_COLUMNS}, index=range(len(dates)))
+    df["NUM_POSTE"] = config.CAP_FERRET_NUM_POSTE
+    df["NOM_USUEL"] = "CAP-FERRET"
+    df["AAAAMMJJ"] = [d.replace("-", "") for d in dates]
+    df["RR"] = "1.0"
+    df["date"] = pd.to_datetime(dates)
+    schema.upsert_dataframe(con, "meteo_jour", df, keys=["NUM_POSTE", "date"])
+
+
+def test_load_events_populates_tables(tmp_path):
+    con = _con(tmp_path)
+    loader._load_events(con)
+    assert con.execute("SELECT COUNT(*) FROM hc_period").fetchone()[0] == 9
+    assert con.execute("SELECT COUNT(*) FROM interdiction_period").fetchone()[0] == 4
+    types = {r[1]: r[2] for r in con.execute("PRAGMA table_info('hc_period')").fetchall()}
+    assert types["verified"] == "BOOLEAN"
+    assert types["start_date"] == "DATE"
+    con.close()
+
+
+def test_event_list_columns_roundtrip(tmp_path):
+    con = _con(tmp_path)
+    loader._load_events(con)
+    rows = con.execute(
+        "SELECT UNNEST(communes) FROM hc_period WHERE label LIKE 'HC 2023%'"
+    ).fetchall()
+    assert {r[0] for r in rows} == {
+        "Andernos", "Lanton", "Arès", "Gujan-Mestras", "La Teste", "Audenge",
+    }
+    con.close()
+
+
+def test_load_events_idempotent(tmp_path):
+    con = _con(tmp_path)
+    loader._load_events(con)
+    loader._load_events(con)
+    assert con.execute("SELECT COUNT(*) FROM hc_period").fetchone()[0] == 9
+    assert con.execute("SELECT COUNT(*) FROM interdiction_period").fetchone()[0] == 4
+    con.close()
+
+
+def test_v_nappe_pluie_events_flags(tmp_path):
+    con = _con(tmp_path)
+    # daily index must span the event dates (up to early 2024)
+    _seed_meteo_on_dates(con, ["2015-01-01", "2024-02-01"])
+    loader.build_nappe_pluie_daily(con)
+    loader._load_events(con)
+    schema.create_event_views(con)
+
+    def flags(d):
+        return con.execute(
+            "SELECT in_hc, in_interdiction FROM v_nappe_pluie_events WHERE date = ?",
+            [dt.date.fromisoformat(d)],
+        ).fetchone()
+
+    assert flags("2023-11-15") == (True, False)   # inside HC 2023, no interdiction then
+    assert flags("2019-07-01") == (False, False)  # normal day
+    assert flags("2024-01-05") == (False, True)   # inside 2023-12-27→2024-01-19 interdiction
+    con.close()
+
+
 def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
     calls = {}
 
