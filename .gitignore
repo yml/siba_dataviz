@@ -10,3 +10,5 @@ __pycache__/
 
 .ipynb_checkpoints/
 .marimo.toml
+marimo/__marimo__/
+marimo/layouts/
