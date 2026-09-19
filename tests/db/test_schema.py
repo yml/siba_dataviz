@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 from siba.db import config, schema
 
@@ -12,6 +11,8 @@ def _tables(con):
 
 
 def test_create_all_makes_tables_and_view(con):
+    # `con` already ran create_all once; a second call must be idempotent.
+    schema.create_all(con)
     names = _tables(con)
     assert {"station", "nappe_mesure", "meteo_jour", "ingest_log"} <= names
     # view is queryable
@@ -23,14 +24,6 @@ def test_meteo_jour_has_all_raw_columns_plus_date(con):
     assert "date" in cols
     for raw in config.METEO_COLUMNS:
         assert raw in cols
-
-
-def test_ensure_is_idempotent(tmp_path):
-    c = schema.connect(tmp_path / "t.duckdb")
-    schema.create_all(c)
-    schema.ensure(c)  # must not raise on existing tables
-    assert {"station", "nappe_mesure"} <= _tables(c)
-    c.close()
 
 
 def test_upsert_dataframe_inserts_then_updates(con):

@@ -92,10 +92,6 @@ def create_all(con: duckdb.DuckDBPyConnection) -> None:
     )
 
 
-def ensure(con: duckdb.DuckDBPyConnection) -> None:
-    create_all(con)  # all statements are IF NOT EXISTS / OR REPLACE
-
-
 def drop_all(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("DROP VIEW IF EXISTS v_meteo_interest")
     for t in ("ingest_log", "meteo_jour", "nappe_mesure", "station", "nappe_pluie_daily"):

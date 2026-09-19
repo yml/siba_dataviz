@@ -136,7 +136,7 @@ def test_fetch_nappe_year_retries_on_timeout():
 
 def test_fetch_nappe_year_raises_on_persistent_5xx():
     sess = _AlwaysStatus(500)
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         sources.fetch_nappe_year("A/F", 2024, session=sess)
     assert sess.calls == config.NAPPE_MAX_RETRIES  # retried, then gave up
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import tempfile
 import time
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -203,7 +202,7 @@ def update(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
     con = schema.connect(db_path)
     try:
-        schema.ensure(con)
+        schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
         schema.seed_stations(con)
         year = dt.date.today().year
         # Prev + current year: a January run still picks up late-December points
