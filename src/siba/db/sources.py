@@ -68,8 +68,9 @@ def fetch_nappe_year(
             "date_fin_mesure": f"{year}-12-31",
         }
         resp = _get_with_retry(sess, url, params)
-        if resp.status_code not in (200, 206):
-            break
+        # A non-2xx here is a real API failure (e.g. 404), not "no data": surface
+        # it instead of returning an empty frame that looks like an empty year.
+        resp.raise_for_status()
         data = resp.json()
         batch = data.get("data", [])
         if not batch:

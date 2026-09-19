@@ -19,6 +19,10 @@ class _FakeResp:
     def json(self):
         return self._payload
 
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(str(self.status_code))
+
 
 class _FakeSession:
     """Renvoie une page de données puis une page vide (fin de pagination)."""
@@ -150,3 +154,11 @@ def test_fetch_nappe_year_raises_on_persistent_5xx():
     with pytest.raises(Exception):
         sources.fetch_nappe_year("A/F", 2024, session=sess)
     assert sess.calls == config.NAPPE_MAX_RETRIES  # retried, then gave up
+
+
+def test_fetch_nappe_year_raises_on_client_error():
+    # A 404 is a real failure, not "no data": it must surface, not return empty.
+    sess = _AlwaysStatus(404)
+    with pytest.raises(requests.exceptions.HTTPError):
+        sources.fetch_nappe_year("A/F", 2024, session=sess)
+    assert sess.calls == 1  # client error is not retried
