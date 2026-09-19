@@ -28,8 +28,11 @@ def _fake_nappe(code_bss, year, **kwargs):
 def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     con = _con(tmp_path)
-    n = loader._load_nappe(con, [2024], fetch=_fake_nappe)
+    n, dmin, dmax = loader._load_nappe(con, [2024], fetch=_fake_nappe)
     assert n == len(config.PIEZOMETERS)
+    # the loader reports the date range actually loaded (fed to ingest_log)
+    assert dmin == dt.date(2024, 6, 1)
+    assert dmax == dt.date(2024, 6, 1)
     count = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
     assert count == len(config.PIEZOMETERS)
     # idempotent: re-run does not duplicate
@@ -53,8 +56,10 @@ def _copy_download(meteo_csv, seen=None):
 def test_load_meteo_upserts_all_rows_and_columns(tmp_path, meteo_csv):
     con = _con(tmp_path)
     seen = {}
-    n = loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv, seen))
+    n, dmin, dmax = loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv, seen))
     assert n == 3  # all Gironde stations kept, not just Cap-Ferret
+    assert dmin == dt.date(2025, 1, 1)
+    assert dmax == dt.date(2025, 1, 2)
     count = con.execute("SELECT COUNT(*) FROM meteo_jour").fetchone()[0]
     assert count == 3
     # every raw column landed; a column absent from the file is present as NULL
@@ -184,11 +189,11 @@ def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
 
     def fake_load_nappe(con, years, **kw):
         calls["nappe_years"] = list(years)
-        return 0
+        return 0, None, None
 
     def fake_load_meteo(con, keys, **kw):
         calls["meteo_keys"] = list(keys)
-        return 0
+        return 0, None, None
 
     monkeypatch.setattr(loader, "_load_nappe", fake_load_nappe)
     monkeypatch.setattr(loader, "_load_meteo", fake_load_meteo)
@@ -200,10 +205,14 @@ def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
 
 def test_rebuild_loads_all_years_and_files(tmp_path, monkeypatch):
     calls = {}
-    monkeypatch.setattr(loader, "_load_nappe",
-                        lambda con, years, **kw: calls.__setitem__("years", list(years)) or 0)
-    monkeypatch.setattr(loader, "_load_meteo",
-                        lambda con, keys, **kw: calls.__setitem__("keys", list(keys)) or 0)
+    monkeypatch.setattr(
+        loader, "_load_nappe",
+        lambda con, years, **kw: calls.__setitem__("years", list(years)) or (0, None, None),
+    )
+    monkeypatch.setattr(
+        loader, "_load_meteo",
+        lambda con, keys, **kw: calls.__setitem__("keys", list(keys)) or (0, None, None),
+    )
 
     loader.rebuild(db_path=tmp_path / "r.duckdb")
     assert calls["years"][0] == config.NAPPE_START_YEAR
@@ -211,12 +220,25 @@ def test_rebuild_loads_all_years_and_files(tmp_path, monkeypatch):
     assert set(calls["keys"]) == set(config.METEO_URLS)
 
 
-def test_update_writes_ingest_log(tmp_path, monkeypatch):
-    monkeypatch.setattr(loader, "_load_nappe", lambda con, years, **kw: 5)
-    monkeypatch.setattr(loader, "_load_meteo", lambda con, keys, **kw: 3)
+def test_update_writes_ingest_log_with_date_range(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        loader, "_load_nappe",
+        lambda con, years, **kw: (5, dt.date(2024, 1, 1), dt.date(2024, 6, 1)),
+    )
+    monkeypatch.setattr(
+        loader, "_load_meteo",
+        lambda con, keys, **kw: (3, dt.date(2025, 1, 1), dt.date(2025, 1, 2)),
+    )
+    year = dt.date.today().year
     dbp = tmp_path / "l.duckdb"
     loader.update(db_path=dbp)
     con = schema.connect(dbp)
-    n = con.execute("SELECT COUNT(*) FROM ingest_log WHERE mode = 'update'").fetchone()[0]
-    assert n >= 1
+    rows = con.execute(
+        "SELECT source, scope, mode, rows_upserted, date_min, date_max "
+        "FROM ingest_log ORDER BY source"
+    ).fetchall()
+    assert rows == [
+        ("hubeau", f"nappe {year}", "update", 5, dt.date(2024, 1, 1), dt.date(2024, 6, 1)),
+        ("meteofrance", "meteo latest", "update", 3, dt.date(2025, 1, 1), dt.date(2025, 1, 2)),
+    ]
     con.close()

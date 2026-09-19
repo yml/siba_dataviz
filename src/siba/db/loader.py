@@ -13,17 +13,37 @@ import pandas as pd
 from . import config, schema, sources
 
 
-def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year) -> int:
+def _as_date(value):
+    """Normalise un Timestamp/date/None en ``datetime.date`` (ou None)."""
+    if value is None or pd.isna(value):
+        return None
+    return pd.Timestamp(value).date()
+
+
+def _span(lo, hi, other_lo, other_hi):
+    """Étend un intervalle (lo, hi) avec (other_lo, other_hi), None-safe."""
+    if other_lo is not None:
+        lo = other_lo if lo is None else min(lo, other_lo)
+    if other_hi is not None:
+        hi = other_hi if hi is None else max(hi, other_hi)
+    return lo, hi
+
+
+def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year):
     total = 0
+    dmin = dmax = None
     for p in config.PIEZOMETERS:
         for year in years:
             df = fetch(p["code_bss"], year)
             total += schema.upsert_dataframe(
                 con, "nappe_mesure", df, keys=["code_bss", "date_mesure"]
             )
+            if not df.empty:
+                dates = pd.to_datetime(df["date_mesure"])
+                dmin, dmax = _span(dmin, dmax, _as_date(dates.min()), _as_date(dates.max()))
             # Espace les requêtes pour éviter le throttling Hub'eau en rebuild.
             time.sleep(config.NAPPE_REQUEST_DELAY)
-    return total
+    return total, dmin, dmax
 
 
 def _ingest_meteo_csv(con, path) -> int:
@@ -56,7 +76,9 @@ def _ingest_meteo_csv(con, path) -> int:
         """,
         [path],
     )
-    n = con.execute("SELECT COUNT(*) FROM _meteo_stage").fetchone()[0]
+    n, dmin, dmax = con.execute(
+        'SELECT COUNT(*), MIN("date"), MAX("date") FROM _meteo_stage'
+    ).fetchone()
     collist = ", ".join(f'"{c}"' for c in config.METEO_COLUMNS + ["date"])
     update_cols = [c for c in config.METEO_COLUMNS if c != "NUM_POSTE"]
     setlist = ", ".join(f'"{c}" = excluded."{c}"' for c in update_cols)
@@ -65,17 +87,20 @@ def _ingest_meteo_csv(con, path) -> int:
         f'ON CONFLICT ("NUM_POSTE", "date") DO UPDATE SET {setlist}'
     )
     con.execute("DROP TABLE _meteo_stage")
-    return n
+    return n, dmin, dmax
 
 
-def _load_meteo(con, url_keys, *, download=sources.download_meteo_file) -> int:
+def _load_meteo(con, url_keys, *, download=sources.download_meteo_file):
     total = 0
+    dmin = dmax = None
     for key in url_keys:
         url = config.METEO_URLS[key]
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = download(url, tmp)
-            total += _ingest_meteo_csv(con, csv_path)
-    return total
+            n, lo, hi = _ingest_meteo_csv(con, csv_path)
+            total += n
+            dmin, dmax = _span(dmin, dmax, lo, hi)
+    return total, dmin, dmax
 
 
 def build_nappe_pluie_daily(con):
@@ -166,11 +191,11 @@ def _enrich_stations(con) -> None:
     )
 
 
-def _log(con, source, scope, mode, rows) -> None:
+def _log(con, source, scope, mode, rows, date_min=None, date_max=None) -> None:
     con.execute(
         "INSERT INTO ingest_log (source, scope, mode, rows_upserted, "
-        "date_min, date_max, fetched_at) VALUES (?, ?, ?, ?, NULL, NULL, ?)",
-        [source, scope, mode, rows, dt.datetime.now()],
+        "date_min, date_max, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [source, scope, mode, rows, date_min, date_max, dt.datetime.now()],
     )
 
 
@@ -181,12 +206,12 @@ def update(db_path=None) -> None:
         schema.ensure(con)
         schema.seed_stations(con)
         year = dt.date.today().year
-        n_nappe = _load_nappe(con, [year])
-        n_meteo = _load_meteo(con, ["latest"])
+        n_nappe, nmin, nmax = _load_nappe(con, [year])
+        n_meteo, mmin, mmax = _load_meteo(con, ["latest"])
         _enrich_stations(con)
         build_nappe_pluie_daily(con)
-        _log(con, "hubeau", f"nappe {year}", "update", n_nappe)
-        _log(con, "meteofrance", "meteo latest", "update", n_meteo)
+        _log(con, "hubeau", f"nappe {year}", "update", n_nappe, nmin, nmax)
+        _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
     finally:
         con.close()
 
@@ -199,11 +224,11 @@ def rebuild(db_path=None) -> None:
         schema.create_all(con)
         schema.seed_stations(con)
         years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
-        n_nappe = _load_nappe(con, years)
-        n_meteo = _load_meteo(con, list(config.METEO_URLS))
+        n_nappe, nmin, nmax = _load_nappe(con, years)
+        n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
         _enrich_stations(con)
         build_nappe_pluie_daily(con)
-        _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe)
-        _log(con, "meteofrance", "meteo all", "rebuild", n_meteo)
+        _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe, nmin, nmax)
+        _log(con, "meteofrance", "meteo all", "rebuild", n_meteo, mmin, mmax)
     finally:
         con.close()
