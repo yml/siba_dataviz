@@ -245,19 +245,28 @@ def update(db_path=None) -> None:
     con = schema.connect(db_path)
     try:
         print(f"siba.db update → {db_path}")
-        schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
-        schema.seed_stations(con)
-        year = dt.date.today().year
-        # Prev + current year: a January run still picks up late-December points
-        # and prior-year requalifications; the upsert absorbs the overlap.
-        years = [year - 1, year]
-        n_nappe, nmin, nmax = _load_nappe(con, years)
-        n_meteo, mmin, mmax = _load_meteo(con, ["latest"])
-        _enrich_stations(con)
-        print("Construction de nappe_pluie_daily …")
-        build_nappe_pluie_daily(con)
-        _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
-        _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
+        # Atomic: schema changes, loads, the derived rebuild and the log rows run
+        # in one transaction so a mid-run failure (e.g. meteo after nappe) rolls
+        # back and never leaves raw and derived data inconsistent.
+        con.execute("BEGIN TRANSACTION")
+        try:
+            schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
+            schema.seed_stations(con)
+            year = dt.date.today().year
+            # Prev + current year: a January run still picks up late-December points
+            # and prior-year requalifications; the upsert absorbs the overlap.
+            years = [year - 1, year]
+            n_nappe, nmin, nmax = _load_nappe(con, years)
+            n_meteo, mmin, mmax = _load_meteo(con, ["latest"])
+            _enrich_stations(con)
+            print("Construction de nappe_pluie_daily …")
+            build_nappe_pluie_daily(con)
+            _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
+            _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
         print(format_summary(con, "update"))
     finally:
         con.close()

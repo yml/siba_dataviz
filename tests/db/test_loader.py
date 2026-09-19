@@ -319,6 +319,57 @@ def test_rebuild_is_atomic_on_failure(tmp_path, monkeypatch):
     assert after == before  # prior data preserved by rollback
 
 
+def test_update_is_atomic_on_failure(tmp_path, monkeypatch):
+    # If meteo fails after nappe succeeded, an un-transactional update would
+    # commit the raw nappe change while leaving nappe_pluie_daily and ingest_log
+    # stale -> raw/derived go inconsistent. The whole update must be atomic.
+    dbp = tmp_path / "atomic_update.duckdb"
+    code = config.PIEZOMETERS[0]["code_bss"]
+    con = schema.connect(dbp)
+    schema.create_all(con)
+    schema.seed_stations(con)
+    schema.upsert_dataframe(
+        con, "nappe_mesure", _fake_nappe(code, 2020),  # profondeur_nappe = 1.0
+        keys=["code_bss", "date_mesure"],
+    )
+    loader.build_nappe_pluie_daily(con)
+    loader._log(con, "hubeau", "seed", "update", 1, dt.date(2020, 6, 1), dt.date(2020, 6, 1))
+    before_nappe = con.execute(
+        "SELECT COUNT(*), COALESCE(SUM(profondeur_nappe), 0) FROM nappe_mesure"
+    ).fetchone()
+    before_daily = con.execute("SELECT COUNT(*) FROM nappe_pluie_daily").fetchone()[0]
+    before_log = con.execute("SELECT COUNT(*) FROM ingest_log").fetchone()[0]
+    con.close()
+
+    def _mutate_nappe(con, years, **kw):
+        changed = _fake_nappe(code, 2020).assign(profondeur_nappe=[2.0])
+        n = schema.upsert_dataframe(
+            con, "nappe_mesure", changed, keys=["code_bss", "date_mesure"]
+        )
+        return n, dt.date(2020, 6, 1), dt.date(2020, 6, 1)
+
+    def _boom(con, keys, **kw):
+        raise RuntimeError("meteo down")
+
+    monkeypatch.setattr(loader, "_load_nappe", _mutate_nappe)
+    monkeypatch.setattr(loader, "_load_meteo", _boom)
+
+    with pytest.raises(RuntimeError):
+        loader.update(db_path=dbp)
+
+    con = schema.connect(dbp)
+    after_nappe = con.execute(
+        "SELECT COUNT(*), COALESCE(SUM(profondeur_nappe), 0) FROM nappe_mesure"
+    ).fetchone()
+    after_daily = con.execute("SELECT COUNT(*) FROM nappe_pluie_daily").fetchone()[0]
+    after_log = con.execute("SELECT COUNT(*) FROM ingest_log").fetchone()[0]
+    con.close()
+    # No partial commit: nappe depth still 1.0, daily and log untouched.
+    assert after_nappe == before_nappe
+    assert after_daily == before_daily
+    assert after_log == before_log
+
+
 def test_update_writes_ingest_log_with_date_range(tmp_path, monkeypatch):
     monkeypatch.setattr(
         loader, "_load_nappe",
