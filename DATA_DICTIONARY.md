@@ -161,3 +161,51 @@ Sélection lisible des colonnes utiles pour les stations `station.of_interest`
 | `date_min` | DATE | première date couverte par le chargement |
 | `date_max` | DATE | dernière date couverte |
 | `fetched_at` | TIMESTAMP | horodatage du chargement |
+
+---
+
+## `hc_period` — périodes « hors de contrôle » (HC) du réseau eaux usées
+
+Données curées à la main (fixture `src/siba/db/fixtures/events.toml`), remplacées
+intégralement à chaque `update` / `rebuild`. Une ligne par période HC signalée.
+
+| colonne | type | description |
+|---|---|---|
+| `start_date` | DATE | début de la période HC |
+| `end_date` | DATE | fin de la période HC |
+| `label` | VARCHAR | libellé lisible de l'épisode |
+| `communes` | VARCHAR[] | communes concernées (liste) |
+| `cause` | VARCHAR | cause rapportée (saturation réseau, surverses…) |
+| `source` | VARCHAR | source de l'information |
+| `verified` | BOOLEAN | `true` = date confirmée par arrêté préfectoral / constat OFB officiel ; `false` = date estimée / rapportée (presse, lanceurs d'alerte) |
+
+---
+
+## `interdiction_period` — interdictions préfectorales (pêche / commercialisation coquillages)
+
+Fixture curée, remplacée intégralement à chaque chargement. Bassin d'Arcachon +
+Banc d'Arguin. Une ligne par arrêté d'interdiction.
+
+| colonne | type | description |
+|---|---|---|
+| `start_date` | DATE | début de l'interdiction |
+| `end_date` | DATE | fin (levée) de l'interdiction |
+| `label` | VARCHAR | libellé lisible de l'épisode |
+| `especes` | VARCHAR[] | espèces / coquillages visés (liste) |
+| `cause` | VARCHAR | cause (norovirus origine EU, toxines algales…) |
+| `source` | VARCHAR | source de l'information |
+| `verified` | BOOLEAN | `true` = date confirmée par arrêté préfectoral / constat OFB officiel ; `false` = date estimée / rapportée |
+| `peche_loisir` | BOOLEAN | l'interdiction couvre aussi la pêche de loisir |
+
+---
+
+## `v_nappe_pluie_events` — vue journalière nappe/pluie + drapeaux d'événements
+
+Vue construite sur `nappe_pluie_daily` (toutes ses colonnes reprises via `d.*`),
+augmentée de deux drapeaux booléens par jour, pour l'analyse de corrélation.
+
+| colonne | type | description |
+|---|---|---|
+| *(colonnes de `nappe_pluie_daily`)* | | `date`, `Blagon`, `Piraillan`, `rr`, `rr_7d`, `rr_14d`, `rr_28d`, `rr_56d` |
+| `in_hc` | BOOLEAN | le jour tombe dans au moins une période `hc_period` |
+| `in_interdiction` | BOOLEAN | le jour tombe dans au moins une période `interdiction_period` |
