@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import tempfile
 from pathlib import Path
 
@@ -103,9 +104,63 @@ def build_nappe_pluie_daily(con):
     return out
 
 
-def update(db_path=None):
-    raise NotImplementedError
+def _enrich_stations(con) -> None:
+    """Complète name/lat/lon/alti des stations météo depuis les données."""
+    con.execute(
+        """
+        UPDATE station AS s
+        SET name = m.name, lat = m.lat, lon = m.lon, alti = m.alti
+        FROM (
+            SELECT "NUM_POSTE" AS num_poste,
+                   any_value("NOM_USUEL") AS name,
+                   any_value(TRY_CAST("LAT"  AS DOUBLE)) AS lat,
+                   any_value(TRY_CAST("LON"  AS DOUBLE)) AS lon,
+                   any_value(TRY_CAST("ALTI" AS DOUBLE)) AS alti
+            FROM meteo_jour GROUP BY "NUM_POSTE"
+        ) AS m
+        WHERE s.num_poste = m.num_poste
+        """
+    )
 
 
-def rebuild(db_path=None):
-    raise NotImplementedError
+def _log(con, source, scope, mode, rows) -> None:
+    con.execute(
+        "INSERT INTO ingest_log (source, scope, mode, rows_upserted, "
+        "date_min, date_max, fetched_at) VALUES (?, ?, ?, ?, NULL, NULL, ?)",
+        [source, scope, mode, rows, dt.datetime.now()],
+    )
+
+
+def update(db_path=None) -> None:
+    db_path = config.DB_PATH if db_path is None else db_path
+    con = schema.connect(db_path)
+    try:
+        schema.ensure(con)
+        schema.seed_stations(con)
+        year = dt.date.today().year
+        n_nappe = _load_nappe(con, [year])
+        n_meteo = _load_meteo(con, ["latest"])
+        _enrich_stations(con)
+        build_nappe_pluie_daily(con)
+        _log(con, "hubeau", f"nappe {year}", "update", n_nappe)
+        _log(con, "meteofrance", "meteo latest", "update", n_meteo)
+    finally:
+        con.close()
+
+
+def rebuild(db_path=None) -> None:
+    db_path = config.DB_PATH if db_path is None else db_path
+    con = schema.connect(db_path)
+    try:
+        schema.drop_all(con)
+        schema.create_all(con)
+        schema.seed_stations(con)
+        years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
+        n_nappe = _load_nappe(con, years)
+        n_meteo = _load_meteo(con, list(config.METEO_URLS))
+        _enrich_stations(con)
+        build_nappe_pluie_daily(con)
+        _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe)
+        _log(con, "meteofrance", "meteo all", "rebuild", n_meteo)
+    finally:
+        con.close()

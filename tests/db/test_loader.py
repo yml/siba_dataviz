@@ -120,3 +120,49 @@ def test_build_creates_table(tmp_path):
     for p in config.PIEZOMETERS:
         assert p["col"] in cols
     con.close()
+
+
+import datetime as dt
+
+
+def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
+    calls = {}
+
+    def fake_load_nappe(con, years, **kw):
+        calls["nappe_years"] = list(years)
+        return 0
+
+    def fake_load_meteo(con, keys, **kw):
+        calls["meteo_keys"] = list(keys)
+        return 0
+
+    monkeypatch.setattr(loader, "_load_nappe", fake_load_nappe)
+    monkeypatch.setattr(loader, "_load_meteo", fake_load_meteo)
+
+    loader.update(db_path=tmp_path / "u.duckdb")
+    assert calls["nappe_years"] == [dt.date.today().year]
+    assert calls["meteo_keys"] == ["latest"]
+
+
+def test_rebuild_loads_all_years_and_files(tmp_path, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(loader, "_load_nappe",
+                        lambda con, years, **kw: calls.__setitem__("years", list(years)) or 0)
+    monkeypatch.setattr(loader, "_load_meteo",
+                        lambda con, keys, **kw: calls.__setitem__("keys", list(keys)) or 0)
+
+    loader.rebuild(db_path=tmp_path / "r.duckdb")
+    assert calls["years"][0] == config.NAPPE_START_YEAR
+    assert calls["years"][-1] == dt.date.today().year
+    assert set(calls["keys"]) == set(config.METEO_URLS)
+
+
+def test_update_writes_ingest_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(loader, "_load_nappe", lambda con, years, **kw: 5)
+    monkeypatch.setattr(loader, "_load_meteo", lambda con, keys, **kw: 3)
+    dbp = tmp_path / "l.duckdb"
+    loader.update(db_path=dbp)
+    con = schema.connect(dbp)
+    n = con.execute("SELECT COUNT(*) FROM ingest_log WHERE mode = 'update'").fetchone()[0]
+    assert n >= 1
+    con.close()
