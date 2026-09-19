@@ -223,15 +223,24 @@ def rebuild(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
     con = schema.connect(db_path)
     try:
-        schema.drop_all(con)
-        schema.create_all(con)
-        schema.seed_stations(con)
-        years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
-        n_nappe, nmin, nmax = _load_nappe(con, years)
-        n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
-        _enrich_stations(con)
-        build_nappe_pluie_daily(con)
-        _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe, nmin, nmax)
-        _log(con, "meteofrance", "meteo all", "rebuild", n_meteo, mmin, mmax)
+        # Atomic: drop/create/load run in one transaction so a mid-run failure
+        # (e.g. a Hub'eau timeout) rolls back and preserves the existing data
+        # instead of leaving an emptied DB. DuckDB rolls back DDL and DML together.
+        con.execute("BEGIN TRANSACTION")
+        try:
+            schema.drop_all(con)
+            schema.create_all(con)
+            schema.seed_stations(con)
+            years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
+            n_nappe, nmin, nmax = _load_nappe(con, years)
+            n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
+            _enrich_stations(con)
+            build_nappe_pluie_daily(con)
+            _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe, nmin, nmax)
+            _log(con, "meteofrance", "meteo all", "rebuild", n_meteo, mmin, mmax)
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
     finally:
         con.close()

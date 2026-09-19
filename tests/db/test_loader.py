@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from siba.db import config, loader, schema
 
@@ -221,6 +222,35 @@ def test_rebuild_loads_all_years_and_files(tmp_path, monkeypatch):
     assert calls["years"][0] == config.NAPPE_START_YEAR
     assert calls["years"][-1] == dt.date.today().year
     assert set(calls["keys"]) == set(config.METEO_URLS)
+
+
+def test_rebuild_is_atomic_on_failure(tmp_path, monkeypatch):
+    # A rebuild that fails mid-fetch must not leave an emptied DB: it drops
+    # everything first, so without a transaction a flaky fetch wipes the data.
+    dbp = tmp_path / "atomic.duckdb"
+    con = schema.connect(dbp)
+    schema.create_all(con)
+    schema.seed_stations(con)
+    schema.upsert_dataframe(
+        con, "nappe_mesure", _fake_nappe("Z/F", 2020),
+        keys=["code_bss", "date_mesure"],
+    )
+    before = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
+    con.close()
+    assert before == 1
+
+    def _boom(con, years, **kw):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(loader, "_load_nappe", _boom)
+
+    with pytest.raises(RuntimeError):
+        loader.rebuild(db_path=dbp)
+
+    con = schema.connect(dbp)
+    after = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
+    con.close()
+    assert after == before  # prior data preserved by rollback
 
 
 def test_update_writes_ingest_log_with_date_range(tmp_path, monkeypatch):
