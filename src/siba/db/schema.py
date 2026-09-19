@@ -74,6 +74,33 @@ def create_all(con: duckdb.DuckDBPyConnection) -> None:
     )
     con.execute(
         """
+        CREATE TABLE IF NOT EXISTS hc_period (
+            start_date DATE,
+            end_date   DATE,
+            label      VARCHAR,
+            communes   VARCHAR[],
+            cause      VARCHAR,
+            source     VARCHAR,
+            verified   BOOLEAN
+        )
+        """
+    )
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interdiction_period (
+            start_date   DATE,
+            end_date     DATE,
+            label        VARCHAR,
+            especes      VARCHAR[],
+            cause        VARCHAR,
+            source       VARCHAR,
+            verified     BOOLEAN,
+            peche_loisir BOOLEAN
+        )
+        """
+    )
+    con.execute(
+        """
         CREATE OR REPLACE VIEW v_meteo_interest AS
         SELECT
             m."NUM_POSTE"                AS num_poste,
@@ -94,7 +121,10 @@ def create_all(con: duckdb.DuckDBPyConnection) -> None:
 
 def drop_all(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("DROP VIEW IF EXISTS v_meteo_interest")
-    for t in ("ingest_log", "meteo_jour", "nappe_mesure", "station", "nappe_pluie_daily"):
+    for t in (
+        "ingest_log", "meteo_jour", "nappe_mesure", "station", "nappe_pluie_daily",
+        "hc_period", "interdiction_period",
+    ):
         con.execute(f"DROP TABLE IF EXISTS {t}")
 
 

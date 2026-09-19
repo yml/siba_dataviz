@@ -19,6 +19,28 @@ def test_create_all_makes_tables_and_view(con):
     con.execute("SELECT * FROM v_meteo_interest LIMIT 0")
 
 
+def test_create_all_makes_event_tables(con):
+    names = _tables(con)
+    assert {"hc_period", "interdiction_period"} <= names
+    hc = {r[1]: r[2] for r in con.execute("PRAGMA table_info('hc_period')").fetchall()}
+    assert hc["communes"] == "VARCHAR[]"
+    assert hc["verified"] == "BOOLEAN"
+    assert hc["start_date"] == "DATE"
+    it = {r[1]: r[2] for r in con.execute("PRAGMA table_info('interdiction_period')").fetchall()}
+    assert it["especes"] == "VARCHAR[]"
+    assert it["peche_loisir"] == "BOOLEAN"
+
+
+def test_drop_all_removes_event_tables(tmp_path):
+    c = schema.connect(tmp_path / "d.duckdb")
+    schema.create_all(c)
+    schema.drop_all(c)
+    names = _tables(c)
+    assert "hc_period" not in names
+    assert "interdiction_period" not in names
+    c.close()
+
+
 def test_meteo_jour_has_all_raw_columns_plus_date(con):
     cols = [r[1] for r in con.execute("PRAGMA table_info('meteo_jour')").fetchall()]
     assert "date" in cols
