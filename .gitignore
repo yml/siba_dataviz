@@ -12,3 +12,7 @@ __pycache__/
 .marimo.toml
 marimo/__marimo__/
 marimo/layouts/
+
+# WASM export artifacts (regenerate: make export-wasm)
+results/wasm/
+marimo/episode_hors_controle_export.py
