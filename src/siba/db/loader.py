@@ -26,22 +26,55 @@ def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year) -> int:
     return total
 
 
-def _load_meteo(
-    con,
-    url_keys,
-    *,
-    download=sources.download_meteo_file,
-    read=sources.read_meteo_csv,
-) -> int:
+def _ingest_meteo_csv(con, path) -> int:
+    """Ingère un fichier Météo-France via le lecteur CSV de DuckDB (pas pandas).
+
+    Le fichier est lu en streaming dans une table de staging (toutes colonnes
+    en VARCHAR), cadré sur ``METEO_COLUMNS`` (+ ``date`` dérivée d'AAAAMMJJ),
+    dédupliqué keep-last sur ``(NUM_POSTE, date)``, puis upserté. Renvoie le
+    nombre de lignes stagées.
+    """
+    path = str(path)
+    reader = "read_csv(?, delim=';', header=true, all_varchar=true)"
+    present = [d[0] for d in con.execute(f"SELECT * FROM {reader} LIMIT 0", [path]).description]
+    proj = ", ".join(
+        f'"{c}"' if c in present else f'CAST(NULL AS VARCHAR) AS "{c}"'
+        for c in config.METEO_COLUMNS
+    )
+    con.execute(
+        f"""
+        CREATE TEMP TABLE _meteo_stage AS
+        WITH raw AS (
+            SELECT {proj},
+                   try_strptime("AAAAMMJJ", '%Y%m%d')::DATE AS "date",
+                   row_number() OVER () AS _rn
+            FROM {reader}
+        )
+        SELECT * EXCLUDE (_rn) FROM raw
+        WHERE "date" IS NOT NULL
+        QUALIFY row_number() OVER (PARTITION BY "NUM_POSTE", "date" ORDER BY _rn DESC) = 1
+        """,
+        [path],
+    )
+    n = con.execute("SELECT COUNT(*) FROM _meteo_stage").fetchone()[0]
+    collist = ", ".join(f'"{c}"' for c in config.METEO_COLUMNS + ["date"])
+    update_cols = [c for c in config.METEO_COLUMNS if c != "NUM_POSTE"]
+    setlist = ", ".join(f'"{c}" = excluded."{c}"' for c in update_cols)
+    con.execute(
+        f'INSERT INTO meteo_jour ({collist}) SELECT {collist} FROM _meteo_stage '
+        f'ON CONFLICT ("NUM_POSTE", "date") DO UPDATE SET {setlist}'
+    )
+    con.execute("DROP TABLE _meteo_stage")
+    return n
+
+
+def _load_meteo(con, url_keys, *, download=sources.download_meteo_file) -> int:
     total = 0
     for key in url_keys:
         url = config.METEO_URLS[key]
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = download(url, tmp)
-            df = read(csv_path)
-            total += schema.upsert_dataframe(
-                con, "meteo_jour", df, keys=["NUM_POSTE", "date"]
-            )
+            total += _ingest_meteo_csv(con, csv_path)
     return total
 
 

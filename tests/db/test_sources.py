@@ -61,21 +61,6 @@ def test_fetch_nappe_year_empty_has_columns():
     assert df.empty
 
 
-from siba.db import config as db_config
-
-
-def test_read_meteo_csv_shape_and_date(meteo_csv):
-    df = sources.read_meteo_csv(meteo_csv)
-    # exactement les colonnes brutes + date
-    assert list(df.columns) == db_config.METEO_COLUMNS + ["date"]
-    assert len(df) == 3  # toutes les stations conservées
-    assert str(df["date"].iloc[0].date()) == "2025-01-01"
-    # colonne absente du fichier → présente mais NA
-    assert df["TX"].isna().all()
-    # valeurs brutes en texte (verbatim)
-    assert df["RR"].iloc[1] == "5.5"
-
-
 def test_download_meteo_file_gunzips(tmp_path, monkeypatch):
     import gzip
     import io

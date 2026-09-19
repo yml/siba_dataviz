@@ -110,12 +110,3 @@ def download_meteo_file(url: str, dest_dir) -> Path:
         raw_path.unlink(missing_ok=True)
         return csv_path
     return raw_path
-
-
-def read_meteo_csv(path) -> pd.DataFrame:
-    """Lit un CSV Météo-France (;-delimited) en texte, cadre sur METEO_COLUMNS."""
-    df = pd.read_csv(path, delimiter=";", dtype=str)
-    df = df.reindex(columns=config.METEO_COLUMNS)
-    df["date"] = pd.to_datetime(df["AAAAMMJJ"], format="%Y%m%d", errors="coerce")
-    df = df.dropna(subset=["date"]).reset_index(drop=True)
-    return df

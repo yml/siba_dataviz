@@ -1,6 +1,10 @@
+import datetime as dt
+import shutil
+from pathlib import Path
+
 import pandas as pd
 
-from siba.db import config, loader, schema, sources
+from siba.db import config, loader, schema
 
 
 def _con(tmp_path):
@@ -35,25 +39,59 @@ def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
     con.close()
 
 
-def test_load_meteo_upserts_and_cleans_temp(tmp_path, meteo_csv):
-    con = _con(tmp_path)
-    seen = {}
-
+def _copy_download(meteo_csv, seen=None):
     def _dl(url, dest_dir):
-        # simulate download by copying fixture into the temp dir
-        import shutil
-        from pathlib import Path
         dest = Path(dest_dir) / "Q_33.csv"
         shutil.copy(meteo_csv, dest)
-        seen["dir"] = Path(dest_dir)
+        if seen is not None:
+            seen["dir"] = Path(dest_dir)
         return dest
 
-    n = loader._load_meteo(con, ["latest"], download=_dl, read=sources.read_meteo_csv)
-    assert n == 3
+    return _dl
+
+
+def test_load_meteo_upserts_all_rows_and_columns(tmp_path, meteo_csv):
+    con = _con(tmp_path)
+    seen = {}
+    n = loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv, seen))
+    assert n == 3  # all Gironde stations kept, not just Cap-Ferret
     count = con.execute("SELECT COUNT(*) FROM meteo_jour").fetchone()[0]
     assert count == 3
-    # temp dir cleaned
+    # every raw column landed; a column absent from the file is present as NULL
+    cols = [r[1] for r in con.execute("PRAGMA table_info('meteo_jour')").fetchall()]
+    for raw in config.METEO_COLUMNS:
+        assert raw in cols
+    assert con.execute("SELECT COUNT(*) FROM meteo_jour WHERE TX IS NOT NULL").fetchone()[0] == 0
+    # date typed as DATE and the (NUM_POSTE, date) key holds (2 Cap-Ferret days)
+    date_type = con.execute(
+        "SELECT data_type FROM information_schema.columns "
+        "WHERE table_name = 'meteo_jour' AND column_name = 'date'"
+    ).fetchone()[0]
+    assert date_type == "DATE"
+    n_cf = con.execute(
+        "SELECT COUNT(*) FROM meteo_jour WHERE NUM_POSTE = ?",
+        [config.CAP_FERRET_NUM_POSTE],
+    ).fetchone()[0]
+    assert n_cf == 2
+    # temp dir cleaned up
     assert not seen["dir"].exists()
+    con.close()
+
+
+def test_load_meteo_idempotent(tmp_path, meteo_csv):
+    con = _con(tmp_path)
+    loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv))
+    loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv))
+    assert con.execute("SELECT COUNT(*) FROM meteo_jour").fetchone()[0] == 3
+    con.close()
+
+
+def test_v_meteo_interest_only_returns_stations_of_interest(tmp_path, meteo_csv):
+    con = _con(tmp_path)
+    loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv))
+    rows = con.execute("SELECT num_poste, rr FROM v_meteo_interest ORDER BY date").fetchall()
+    # only Cap-Ferret (of_interest), station 33999999 excluded; TRY_CAST maps rr
+    assert rows == [("33236002", 0.0), ("33236002", 5.5)]
     con.close()
 
 
@@ -139,9 +177,6 @@ def test_build_creates_table(tmp_path):
     for p in config.PIEZOMETERS:
         assert p["col"] in cols
     con.close()
-
-
-import datetime as dt
 
 
 def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
