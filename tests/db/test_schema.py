@@ -47,6 +47,20 @@ def test_upsert_dataframe_inserts_then_updates(con):
     assert rows == (1, 2.0)
 
 
+def test_upsert_dataframe_dedups_within_batch_keep_last(con):
+    # Two rows with the same key in ONE batch: DuckDB ON CONFLICT keeps the
+    # first, so a requalified later duplicate would be lost. We must keep last.
+    df = pd.DataFrame(
+        {"code_bss": ["A/F", "A/F"],
+         "date_mesure": ["2020-01-01", "2020-01-01"],
+         "profondeur_nappe": [1.0, 2.0]}
+    )
+    n = schema.upsert_dataframe(con, "nappe_mesure", df, keys=["code_bss", "date_mesure"])
+    assert n == 1
+    rows = con.execute("SELECT COUNT(*), MAX(profondeur_nappe) FROM nappe_mesure").fetchone()
+    assert rows == (1, 2.0)
+
+
 def test_seed_stations_marks_of_interest(con):
     schema.seed_stations(con)
     n_interest = con.execute(

@@ -110,6 +110,10 @@ def upsert_dataframe(
 ) -> int:
     if df.empty:
         return 0
+    # A same-key duplicate later in the same batch is a requalified value; keep
+    # it. DuckDB ON CONFLICT keeps the first of two same-key rows in one INSERT
+    # (and can even reject updating the same row twice), so dedup keep-last here.
+    df = df.drop_duplicates(subset=keys, keep="last")
     cols = list(df.columns)
     con.register("_upsert_df", df)
     collist = ", ".join(f'"{c}"' for c in cols)
