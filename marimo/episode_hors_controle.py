@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.24.2"
-app = marimo.App(width="full")
+app = marimo.App(width="full", auto_download=["html"], sql_output="native")
 
 
 @app.cell
@@ -13,13 +13,12 @@ def _():
     import duckdb
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
-    import seaborn as sns
     from scipy import stats
 
     from siba.db.config import DB_PATH
 
     plt.style.use("seaborn-v0_8-whitegrid")
-    return DB_PATH, duckdb, mdates, mo, np, pd, plt, sns, stats
+    return DB_PATH, duckdb, mdates, mo, np, pd, plt, stats
 
 
 @app.cell
@@ -199,7 +198,7 @@ def _(NAPPE_COLS, df, hc_end, hc_start, plt):
 
 
 @app.cell
-def _(NAPPE_COLS, df, hc_end, hc_start, np, plt, sns):
+def _(NAPPE_COLS, df, hc_end, hc_start, np, plt):
     def _plot():
         a = df.copy()
         a["periode"] = np.where(
@@ -207,15 +206,22 @@ def _(NAPPE_COLS, df, hc_end, hc_start, np, plt, sns):
             "Hors de contrôle", "Normal",
         )
         variables = NAPPE_COLS + ["RR7"]
-        palette = {"Normal": "steelblue", "Hors de contrôle": "red"}
+        order = ["Normal", "Hors de contrôle"]
+        colors = {"Normal": "steelblue", "Hors de contrôle": "red"}
         fig, axes = plt.subplots(1, len(variables), figsize=(5 * len(variables), 5))
         for ax, var in zip(axes, variables):
-            data = a[[var, "periode"]].dropna()
-            sns.boxplot(data=data, x="periode", y=var, hue="periode",
-                        palette=palette, legend=False, ax=ax)
+            a2 = a[[var, "periode"]].dropna()
+            groups = [a2[a2["periode"] == g][var].values for g in order]
+            bp = ax.boxplot(groups, patch_artist=True, widths=0.6)
+            ax.set_xticks([1, 2])
+            ax.set_xticklabels(order)
+            for patch, g in zip(bp["boxes"], order):
+                patch.set_facecolor(colors[g])
+                patch.set_alpha(0.6)
+            for med in bp["medians"]:
+                med.set_color("black")
             ax.set_ylabel("Profondeur nappe (m)" if var in NAPPE_COLS
                           else "Cumul 7j (mm)", fontsize=11)
-            ax.set_xlabel("")
             ax.set_title(var, fontsize=12, fontweight="bold")
             if var in NAPPE_COLS:
                 ax.invert_yaxis()
@@ -276,7 +282,7 @@ def _(mo):
 
 
 @app.cell
-def _(df, pd, plt, sns):
+def _(df, np, pd, plt):
     def _heat():
         d = df.dropna(subset=["Blagon", "RR7"]).copy()
         depth_edges = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
@@ -286,14 +292,27 @@ def _(df, pd, plt, sns):
         g = d.groupby(["dbin", "rbin"], observed=False)["in_hc"]
         prob = (g.mean() * 100).unstack().sort_index(ascending=True)
         cnt = g.count().unstack().sort_index(ascending=True)
+        m = np.where(cnt.to_numpy(dtype=float) < 5, np.nan,
+                     prob.to_numpy(dtype=float))
 
         fig, ax = plt.subplots(figsize=(11, 7))
-        sns.heatmap(
-            prob, mask=cnt < 5, annot=True, fmt=".0f", cmap="Reds",
-            vmin=0, vmax=100, linewidths=0.5, linecolor="white",
-            annot_kws={"fontsize": 9},
-            cbar_kws={"label": "P(hors de contrôle) %"}, ax=ax,
-        )
+        cmap = plt.get_cmap("Reds").copy()
+        cmap.set_bad("#f0f0f0")
+        im = ax.imshow(m, cmap=cmap, vmin=0, vmax=100, aspect="auto",
+                       origin="upper")
+        ax.set_xticks(range(len(prob.columns)))
+        ax.set_xticklabels([str(c) for c in prob.columns], rotation=30,
+                           ha="right", fontsize=8)
+        ax.set_yticks(range(len(prob.index)))
+        ax.set_yticklabels([str(i) for i in prob.index], fontsize=8)
+        for r in range(m.shape[0]):
+            for c in range(m.shape[1]):
+                if not np.isnan(m[r, c]):
+                    ax.text(c, r, f"{m[r, c]:.0f}", ha="center", va="center",
+                            fontsize=8,
+                            color="white" if m[r, c] > 55 else "black")
+        cbar = fig.colorbar(im, ax=ax)
+        cbar.set_label("P(hors de contrôle) %")
         ax.set_xlabel("Cumul pluie 7 jours RR7 (mm)", fontsize=11)
         ax.set_ylabel("Profondeur nappe Blagon (m) — haut = nappe haute", fontsize=11)
         ax.set_title(
