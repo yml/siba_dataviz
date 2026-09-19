@@ -53,3 +53,53 @@ def test_fetch_nappe_year_empty_has_columns():
     df = sources.fetch_nappe_year("X/F", 2024, session=_FakeSession([]))
     assert list(df.columns) == NAPPE_COLS
     assert df.empty
+
+
+from siba.db import config as db_config
+
+
+def test_read_meteo_csv_shape_and_date(meteo_csv):
+    df = sources.read_meteo_csv(meteo_csv)
+    # exactement les colonnes brutes + date
+    assert list(df.columns) == db_config.METEO_COLUMNS + ["date"]
+    assert len(df) == 3  # toutes les stations conservées
+    assert str(df["date"].iloc[0].date()) == "2025-01-01"
+    # colonne absente du fichier → présente mais NA
+    assert df["TX"].isna().all()
+    # valeurs brutes en texte (verbatim)
+    assert df["RR"].iloc[1] == "5.5"
+
+
+def test_download_meteo_file_gunzips(tmp_path, monkeypatch):
+    import gzip
+    import io
+
+    payload = b"NUM_POSTE;AAAAMMJJ;RR\n33236002;20250101;1.0\n"
+    gz = io.BytesIO()
+    with gzip.GzipFile(fileobj=gz, mode="wb") as f:
+        f.write(payload)
+    gz_bytes = gz.getvalue()
+
+    class _Resp:
+        url = "https://x/Q_33_latest-2025-2026_RR-T-Vent.csv.gz"
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def iter_content(self, chunk_size=1):
+            yield gz_bytes
+
+        def raise_for_status(self):
+            pass
+
+    def _fake_get(url, stream=False, timeout=None, allow_redirects=True):
+        return _Resp()
+
+    monkeypatch.setattr(sources.requests, "get", _fake_get)
+    out = sources.download_meteo_file("https://data.gouv/whatever", tmp_path)
+    assert out.suffix == ".csv"
+    assert out.read_bytes() == payload

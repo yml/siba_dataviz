@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
+import shutil
 import time
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -59,4 +62,35 @@ def fetch_nappe_year(
         df["date_mesure"] = pd.to_datetime(df["date_mesure"], errors="coerce")
         df = df.dropna(subset=["date_mesure"])
         df = df.sort_values("date_mesure").reset_index(drop=True)
+    return df
+
+
+def download_meteo_file(url: str, dest_dir) -> Path:
+    """Télécharge *url* dans *dest_dir* (temp), décompresse .gz, renvoie le .csv."""
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with requests.get(url, stream=True, timeout=120, allow_redirects=True) as resp:
+        resp.raise_for_status()
+        fname = resp.url.split("/")[-1] or "meteo_download"
+        raw_path = dest_dir / fname
+        with open(raw_path, "wb") as out:
+            for chunk in resp.iter_content(chunk_size=1 << 16):
+                if chunk:
+                    out.write(chunk)
+
+    if raw_path.suffix == ".gz":
+        csv_path = raw_path.with_suffix("")  # strip .gz
+        with gzip.open(raw_path, "rb") as f_in, open(csv_path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        raw_path.unlink(missing_ok=True)
+        return csv_path
+    return raw_path
+
+
+def read_meteo_csv(path) -> pd.DataFrame:
+    """Lit un CSV Météo-France (;-delimited) en texte, cadre sur METEO_COLUMNS."""
+    df = pd.read_csv(path, delimiter=";", dtype=str)
+    df = df.reindex(columns=config.METEO_COLUMNS)
+    df["date"] = pd.to_datetime(df["AAAAMMJJ"], format="%Y%m%d", errors="coerce")
+    df = df.dropna(subset=["date"]).reset_index(drop=True)
     return df
