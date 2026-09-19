@@ -94,6 +94,8 @@ brutes), `station`, `ingest_log`. Vues/dérivés : `v_meteo_interest` (stations
 d'intérêt), `nappe_pluie_daily` (table matérialisée : nappes interpolées +
 cumuls de pluie 7/14/28/56 j sur Cap-Ferret).
 
+Description détaillée des tables et colonnes : voir [`DATA_DICTIONARY.md`](DATA_DICTIONARY.md).
+
 ## Notebooks
 
 | Notebook | Contenu |
