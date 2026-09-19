@@ -34,9 +34,11 @@ def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year):
     for p in config.PIEZOMETERS:
         for year in years:
             df = fetch(p["code_bss"], year)
-            total += schema.upsert_dataframe(
+            n = schema.upsert_dataframe(
                 con, "nappe_mesure", df, keys=["code_bss", "date_mesure"]
             )
+            total += n
+            print(f"Hub'eau       {p['name']} {year} … {n} lignes")
             if not df.empty:
                 dates = pd.to_datetime(df["date_mesure"])
                 dmin, dmax = _span(dmin, dmax, _as_date(dates.min()), _as_date(dates.max()))
@@ -98,6 +100,7 @@ def _load_meteo(con, url_keys, *, download=sources.download_meteo_file):
             csv_path = download(url, tmp)
             n, lo, hi = _ingest_meteo_csv(con, csv_path)
             total += n
+            print(f"Météo-France  fichier {key} … {n} lignes")
             dmin, dmax = _span(dmin, dmax, lo, hi)
     return total, dmin, dmax
 
@@ -202,6 +205,7 @@ def update(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
     con = schema.connect(db_path)
     try:
+        print(f"siba.db update → {db_path}")
         schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
         schema.seed_stations(con)
         year = dt.date.today().year
@@ -211,6 +215,7 @@ def update(db_path=None) -> None:
         n_nappe, nmin, nmax = _load_nappe(con, years)
         n_meteo, mmin, mmax = _load_meteo(con, ["latest"])
         _enrich_stations(con)
+        print("Construction de nappe_pluie_daily …")
         build_nappe_pluie_daily(con)
         _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
         _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
@@ -222,6 +227,7 @@ def rebuild(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
     con = schema.connect(db_path)
     try:
+        print(f"siba.db rebuild → {db_path}")
         # Atomic: drop/create/load run in one transaction so a mid-run failure
         # (e.g. a Hub'eau timeout) rolls back and preserves the existing data
         # instead of leaving an emptied DB. DuckDB rolls back DDL and DML together.
@@ -234,6 +240,7 @@ def rebuild(db_path=None) -> None:
             n_nappe, nmin, nmax = _load_nappe(con, years)
             n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
             _enrich_stations(con)
+            print("Construction de nappe_pluie_daily …")
             build_nappe_pluie_daily(con)
             _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe, nmin, nmax)
             _log(con, "meteofrance", "meteo all", "rebuild", n_meteo, mmin, mmax)

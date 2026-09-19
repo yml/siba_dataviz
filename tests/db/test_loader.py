@@ -26,6 +26,30 @@ def _fake_nappe(code_bss, year, **kwargs):
     })
 
 
+def test_load_nappe_prints_progress(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
+    con = _con(tmp_path)
+    loader._load_nappe(con, [2024], fetch=_fake_nappe)
+    out = capsys.readouterr().out
+    assert "Blagon (Lanton)" in out  # per piézo
+    assert "2024" in out             # per year
+    assert "1 ligne" in out          # row count
+    con.close()
+
+
+def test_update_prints_start_and_build_lines(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(loader, "_load_nappe", lambda con, years, **kw: (0, None, None))
+    monkeypatch.setattr(loader, "_load_meteo", lambda con, keys, **kw: (0, None, None))
+    dbp = tmp_path / "p.duckdb"
+    loader.update(db_path=dbp)
+    out = capsys.readouterr().out
+    assert "update" in out          # start line names the mode
+    assert str(dbp) in out          # start line names the DB path
+    assert "nappe_pluie_daily" in out  # "building the derived table" line
+    con = schema.connect(dbp)
+    con.close()
+
+
 def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     con = _con(tmp_path)
