@@ -206,11 +206,14 @@ def update(db_path=None) -> None:
         schema.ensure(con)
         schema.seed_stations(con)
         year = dt.date.today().year
-        n_nappe, nmin, nmax = _load_nappe(con, [year])
+        # Prev + current year: a January run still picks up late-December points
+        # and prior-year requalifications; the upsert absorbs the overlap.
+        years = [year - 1, year]
+        n_nappe, nmin, nmax = _load_nappe(con, years)
         n_meteo, mmin, mmax = _load_meteo(con, ["latest"])
         _enrich_stations(con)
         build_nappe_pluie_daily(con)
-        _log(con, "hubeau", f"nappe {year}", "update", n_nappe, nmin, nmax)
+        _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
         _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
     finally:
         con.close()

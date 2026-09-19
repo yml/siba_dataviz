@@ -198,8 +198,11 @@ def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
     monkeypatch.setattr(loader, "_load_nappe", fake_load_nappe)
     monkeypatch.setattr(loader, "_load_meteo", fake_load_meteo)
 
+    year = dt.date.today().year
     loader.update(db_path=tmp_path / "u.duckdb")
-    assert calls["nappe_years"] == [dt.date.today().year]
+    # previous + current year, so January runs still catch late-December points
+    # and prior-year requalifications.
+    assert calls["nappe_years"] == [year - 1, year]
     assert calls["meteo_keys"] == ["latest"]
 
 
@@ -238,7 +241,7 @@ def test_update_writes_ingest_log_with_date_range(tmp_path, monkeypatch):
         "FROM ingest_log ORDER BY source"
     ).fetchall()
     assert rows == [
-        ("hubeau", f"nappe {year}", "update", 5, dt.date(2024, 1, 1), dt.date(2024, 6, 1)),
+        ("hubeau", f"nappe {year - 1}-{year}", "update", 5, dt.date(2024, 1, 1), dt.date(2024, 6, 1)),
         ("meteofrance", "meteo latest", "update", 3, dt.date(2025, 1, 1), dt.date(2025, 1, 2)),
     ]
     con.close()
