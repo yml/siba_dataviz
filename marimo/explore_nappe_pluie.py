@@ -8,17 +8,19 @@ app = marimo.App(width="medium")
 def _():
     import marimo as mo
 
+    import datetime as dt
     import duckdb
     import matplotlib.pyplot as plt
 
     from siba.data.config import DB_PATH
 
-    return DB_PATH, duckdb, mo, plt
+    return DB_PATH, dt, duckdb, mo, plt
 
 
 @app.cell
 def _(DB_PATH, mo):
-    mo.md(f"""
+    mo.md(
+        f"""
     # Nappe + pluie — exploration réactive
 
     Les données viennent de la base DuckDB `{DB_PATH}` (table `nappe_pluie_daily`,
@@ -27,8 +29,11 @@ def _(DB_PATH, mo):
 
     Si la base n'existe pas encore : `make rebuild` (ou `make update`).
 
-    Bouger un curseur recalcule uniquement les cellules qui en dépendent.
-    """)
+    Choisir la période, le piézomètre et la fenêtre de cumul de pluie ci-dessous ;
+    seules les cellules qui en dépendent sont recalculées. Les bandes rouges
+    marquent les périodes « hors de contrôle » (HC) du réseau EU.
+    """
+    )
     return
 
 
@@ -41,71 +46,85 @@ def _(DB_PATH, duckdb, mo):
 
     _con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
-        # Colonnes de piézomètres = tout sauf la date et les colonnes de pluie.
         _cols = [
             r[1] for r in _con.execute("PRAGMA table_info('nappe_pluie_daily')").fetchall()
         ]
+        # Piézomètres = tout sauf la date et les colonnes de pluie.
         piezo_cols = [c for c in _cols if c != "date" and not c.startswith("rr")]
-        annee_min, annee_max = _con.execute(
-            "SELECT year(MIN(date)), year(MAX(date)) FROM nappe_pluie_daily"
+        # Fenêtres de cumul disponibles, déduites des colonnes rr_<n>d.
+        rr_windows = sorted(
+            int(c[3:-1]) for c in _cols if c.startswith("rr_") and c.endswith("d")
+        )
+        db_start, db_end = _con.execute(
+            "SELECT MIN(date), MAX(date) FROM nappe_pluie_daily"
         ).fetchone()
     finally:
         _con.close()
-    return annee_max, annee_min, piezo_cols
+    return db_end, db_start, piezo_cols, rr_windows
 
 
 @app.cell
-def _(annee_max, annee_min, mo, piezo_cols):
-    annee_debut = mo.ui.slider(
-        start=annee_min,
-        stop=annee_max,
-        value=max(annee_min, annee_max - 6),
-        step=1,
-        label="Année de début",
-        show_value=True,
+def _(db_end, db_start, dt, mo, piezo_cols, rr_windows):
+    # Par défaut : les ~6 dernières années disponibles.
+    _default_start = max(db_start, db_end - dt.timedelta(days=6 * 365))
+    periode = mo.ui.date_range(
+        start=db_start, stop=db_end, value=(_default_start, db_end), label="Période"
     )
     piezo = mo.ui.dropdown(
         options=piezo_cols, value=piezo_cols[0], label="Piézomètre"
     )
-    seuil_rr7 = mo.ui.slider(
-        start=20, stop=120, value=70, step=5, label="Seuil RR7 (mm)", show_value=True
+    fenetre = mo.ui.dropdown(
+        options={f"{w} jours": w for w in rr_windows},
+        value=f"{rr_windows[0]} jours",
+        label="Fenêtre de pluie",
     )
-    mo.hstack([annee_debut, piezo, seuil_rr7], justify="start", gap=2)
-    return annee_debut, piezo, seuil_rr7
+    seuil = mo.ui.slider(
+        start=10, stop=300, value=70, step=5, label="Seuil cumul (mm)", show_value=True
+    )
+    mo.vstack(
+        [
+            mo.hstack([periode, piezo], justify="start", gap=2),
+            mo.hstack([fenetre, seuil], justify="start", gap=2),
+        ]
+    )
+    return fenetre, periode, piezo, seuil
 
 
 @app.cell
-def _(DB_PATH, annee_debut, duckdb):
-    date_min = f"{annee_debut.value}-01-01"
+def _(DB_PATH, duckdb, fenetre, periode):
+    date_start, date_end = periode.value
+    rr_col = f"rr_{fenetre.value}d"
+    rr_label = f"RR{fenetre.value}"
+
     _con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         df = _con.execute(
-            'SELECT * FROM nappe_pluie_daily WHERE "date" >= ? ORDER BY "date"',
-            [date_min],
+            'SELECT * FROM nappe_pluie_daily WHERE "date" BETWEEN ? AND ? '
+            'ORDER BY "date"',
+            [date_start, date_end],
         ).df()
-        # Épisodes « hors de contrôle » recoupant la période affichée, bornés à
-        # celle-ci (sinon une bande déborderait et étirerait l'axe des dates).
+        # Épisodes HC recoupant la période, bornés à celle-ci (sinon une bande
+        # déborderait et étirerait l'axe des dates).
         hc = _con.execute(
             """
             SELECT greatest(start_date, ?::DATE) AS start_date,
-                   least(end_date, (SELECT MAX("date") FROM nappe_pluie_daily))
-                       AS end_date,
+                   least(end_date, ?::DATE)      AS end_date,
                    label
             FROM hc_period
-            WHERE end_date >= ?::DATE
+            WHERE end_date >= ?::DATE AND start_date <= ?::DATE
             ORDER BY start_date
             """,
-            [date_min, date_min],
+            [date_start, date_end, date_start, date_end],
         ).df()
     finally:
         _con.close()
     df = df.set_index("date")
-    return date_min, df, hc
+    return date_end, date_start, df, hc, rr_col, rr_label
 
 
 @app.cell
-def _(df, mo, piezo, seuil_rr7):
-    _n_jours = int((df["rr_7d"] > seuil_rr7.value).sum())
+def _(df, mo, piezo, rr_col, rr_label, seuil):
+    _n_jours = int((df[rr_col] > seuil.value).sum())
     _prof = df[piezo.value].dropna()
 
     mo.stop(
@@ -121,7 +140,7 @@ def _(df, mo, piezo, seuil_rr7):
         [
             mo.stat(
                 value=f"{_n_jours}",
-                label=f"Jours RR7 > {seuil_rr7.value} mm",
+                label=f"Jours {rr_label} > {seuil.value} mm",
                 caption=f"sur {len(df)} jours",
             ),
             mo.stat(
@@ -142,7 +161,7 @@ def _(df, mo, piezo, seuil_rr7):
 
 
 @app.cell
-def _(df, hc, piezo, plt, seuil_rr7):
+def _(df, hc, piezo, plt, rr_col, rr_label, seuil):
     def _plot():
         fig, ax = plt.subplots(figsize=(11, 4.5), constrained_layout=True)
 
@@ -159,15 +178,15 @@ def _(df, hc, piezo, plt, seuil_rr7):
                     label=f"Nappe {piezo.value}")
         ax.invert_yaxis()  # profondeur : vers le bas = nappe plus basse
         ax.set_ylabel("Prof. nappe (m)", color="#0066cc")
-        ax.set_title(f"{piezo.value} vs précipitations glissantes 7 j")
+        ax.set_title(f"{piezo.value} vs cumul de pluie {rr_label}")
         if len(hc) or len(serie):
             ax.legend(loc="upper right", fontsize=9)
 
         ax2 = ax.twinx()
-        rr7 = df["rr_7d"].dropna()
-        ax2.fill_between(rr7.index, 0, rr7.values, alpha=0.2, color="green")
-        ax2.axhline(seuil_rr7.value, color="orange", linestyle="--", linewidth=0.9)
-        ax2.set_ylabel("RR7 (mm)", color="green")
+        rr = df[rr_col].dropna()
+        ax2.fill_between(rr.index, 0, rr.values, alpha=0.2, color="green")
+        ax2.axhline(seuil.value, color="orange", linestyle="--", linewidth=0.9)
+        ax2.set_ylabel(f"{rr_label} (mm)", color="green")
         ax2.set_ylim(bottom=0)
         return fig
 
@@ -186,9 +205,10 @@ def _(mo):
 
 
 @app.cell
-def _(DB_PATH, date_min, duckdb, piezo, seuil_rr7):
+def _(DB_PATH, date_end, date_start, duckdb, piezo, rr_col, seuil):
     def _annuel():
-        # piezo.value vient des colonnes de la base, pas d'une saisie libre.
+        # piezo.value et rr_col viennent des colonnes de la base, pas d'une
+        # saisie libre.
         col = piezo.value
         con = duckdb.connect(str(DB_PATH), read_only=True)
         try:
@@ -200,13 +220,13 @@ def _(DB_PATH, date_min, duckdb, piezo, seuil_rr7):
                     round(min("{col}"), 2)    AS nappe_haute_m,
                     round(max("{col}"), 2)    AS nappe_basse_m,
                     round(sum(rr), 0)         AS pluie_totale_mm,
-                    count(*) FILTER (WHERE rr_7d > ?) AS jours_au_dessus_seuil
+                    count(*) FILTER (WHERE "{rr_col}" > ?) AS jours_au_dessus_seuil
                 FROM nappe_pluie_daily
-                WHERE "date" >= ?
+                WHERE "date" BETWEEN ? AND ?
                 GROUP BY annee
                 ORDER BY annee
                 """,
-                [seuil_rr7.value, date_min],
+                [seuil.value, date_start, date_end],
             ).df()
         finally:
             con.close()
