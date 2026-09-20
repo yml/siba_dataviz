@@ -83,10 +83,24 @@ def _(DB_PATH, annee_debut, duckdb):
             'SELECT * FROM nappe_pluie_daily WHERE "date" >= ? ORDER BY "date"',
             [date_min],
         ).df()
+        # Épisodes « hors de contrôle » recoupant la période affichée, bornés à
+        # celle-ci (sinon une bande déborderait et étirerait l'axe des dates).
+        hc = _con.execute(
+            """
+            SELECT greatest(start_date, ?::DATE) AS start_date,
+                   least(end_date, (SELECT MAX("date") FROM nappe_pluie_daily))
+                       AS end_date,
+                   label
+            FROM hc_period
+            WHERE end_date >= ?::DATE
+            ORDER BY start_date
+            """,
+            [date_min, date_min],
+        ).df()
     finally:
         _con.close()
     df = df.set_index("date")
-    return date_min, df
+    return date_min, df, hc
 
 
 @app.cell
@@ -128,16 +142,26 @@ def _(df, mo, piezo, seuil_rr7):
 
 
 @app.cell
-def _(df, piezo, plt, seuil_rr7):
+def _(df, hc, piezo, plt, seuil_rr7):
     def _plot():
         fig, ax = plt.subplots(figsize=(11, 4.5), constrained_layout=True)
 
+        # Périodes « hors de contrôle » du réseau EU, en fond.
+        for i, (_, ev) in enumerate(hc.iterrows()):
+            ax.axvspan(
+                ev["start_date"], ev["end_date"], color="red", alpha=0.15,
+                zorder=0, label="Hors de contrôle" if i == 0 else None,
+            )
+
         serie = df[piezo.value].dropna()
         if len(serie) > 0:
-            ax.plot(serie.index, serie.values, color="#0066cc", linewidth=1.1)
+            ax.plot(serie.index, serie.values, color="#0066cc", linewidth=1.1,
+                    label=f"Nappe {piezo.value}")
         ax.invert_yaxis()  # profondeur : vers le bas = nappe plus basse
         ax.set_ylabel("Prof. nappe (m)", color="#0066cc")
         ax.set_title(f"{piezo.value} vs précipitations glissantes 7 j")
+        if len(hc) or len(serie):
+            ax.legend(loc="upper right", fontsize=9)
 
         ax2 = ax.twinx()
         rr7 = df["rr_7d"].dropna()
