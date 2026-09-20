@@ -332,6 +332,28 @@ def rebuild(db_path=None) -> None:
             years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
             n_nappe, nmin, nmax = _load_nappe(con, years)
             n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
+
+            # Garde-fou : `rebuild` efface avant de recharger. Si une source ne
+            # renvoie rien (panne amont — Hub'eau a déjà répondu HTTP 200 avec
+            # zéro ligne pendant une indisponibilité), on annule au lieu de
+            # committer une table vide : le ROLLBACK ci-dessous restaure les
+            # données précédentes. Zéro ligne sur toutes les années et tous les
+            # points n'est jamais un cas réel.
+            if n_nappe == 0:
+                raise RuntimeError(
+                    f"Hub'eau n'a renvoyé aucune mesure de nappe sur "
+                    f"{years[0]}-{years[-1]} ({len(config.PIEZOMETERS)} piézomètres) : "
+                    "source probablement indisponible. Rebuild annulé, les données "
+                    "existantes sont conservées. Réessayer plus tard, ou utiliser "
+                    "`update` qui n'efface rien."
+                )
+            if n_meteo == 0:
+                raise RuntimeError(
+                    "Météo-France n'a renvoyé aucune ligne : source probablement "
+                    "indisponible. Rebuild annulé, les données existantes sont "
+                    "conservées."
+                )
+
             _enrich_stations(con)
             print("Construction de nappe_pluie_daily …")
             build_nappe_pluie_daily(con)

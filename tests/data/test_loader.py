@@ -337,14 +337,17 @@ def test_update_loads_current_year_and_latest(tmp_path, monkeypatch):
 
 def test_rebuild_loads_all_years_and_files(tmp_path, monkeypatch):
     calls = {}
+    # Non-zero counts: zero now means "source down" and aborts the rebuild.
     monkeypatch.setattr(
         loader, "_load_nappe",
-        lambda con, years, **kw: calls.__setitem__("years", list(years)) or (0, None, None),
+        lambda con, years, **kw: calls.__setitem__("years", list(years)) or (7, None, None),
     )
     monkeypatch.setattr(
         loader, "_load_meteo",
-        lambda con, keys, **kw: calls.__setitem__("keys", list(keys)) or (0, None, None),
+        lambda con, keys, **kw: calls.__setitem__("keys", list(keys)) or (9, None, None),
     )
+    # Keep the test hermetic: the success path refreshes the field descriptor.
+    monkeypatch.setattr(loader.sources, "download_meteo_descriptor", lambda dest: None)
 
     loader.rebuild(db_path=tmp_path / "r.duckdb")
     assert calls["years"][0] == config.NAPPE_START_YEAR
@@ -379,6 +382,57 @@ def test_rebuild_is_atomic_on_failure(tmp_path, monkeypatch):
     after = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
     con.close()
     assert after == before  # prior data preserved by rollback
+
+
+def test_rebuild_aborts_when_source_returns_nothing(tmp_path, monkeypatch):
+    # A source outage can answer HTTP 200 with zero rows (Hub'eau did exactly
+    # that). Since rebuild drops before reloading, committing that would replace
+    # good data with an empty table. It must abort and roll back instead.
+    dbp = tmp_path / "empty_source.duckdb"
+    con = schema.connect(dbp)
+    schema.create_all(con)
+    schema.seed_stations(con)
+    schema.upsert_dataframe(
+        con, "nappe_mesure", _fake_nappe("Z/F", 2020),
+        keys=["code_bss", "date_mesure"],
+    )
+    before = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
+    con.close()
+    assert before == 1
+
+    # fetch "succeeds" but yields nothing, as during the outage
+    monkeypatch.setattr(loader, "_load_nappe", lambda con, years, **kw: (0, None, None))
+    monkeypatch.setattr(loader, "_load_meteo", lambda con, keys, **kw: (5, None, None))
+
+    with pytest.raises(RuntimeError, match="aucune mesure de nappe"):
+        loader.rebuild(db_path=dbp)
+
+    con = schema.connect(dbp)
+    after = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
+    con.close()
+    assert after == before  # existing data survived the outage
+
+
+def test_rebuild_aborts_when_meteo_returns_nothing(tmp_path, monkeypatch):
+    dbp = tmp_path / "empty_meteo.duckdb"
+    con = schema.connect(dbp)
+    schema.create_all(con)
+    schema.seed_stations(con)
+    schema.upsert_dataframe(
+        con, "nappe_mesure", _fake_nappe("Z/F", 2020),
+        keys=["code_bss", "date_mesure"],
+    )
+    con.close()
+
+    monkeypatch.setattr(loader, "_load_nappe", lambda con, years, **kw: (3, None, None))
+    monkeypatch.setattr(loader, "_load_meteo", lambda con, keys, **kw: (0, None, None))
+
+    with pytest.raises(RuntimeError, match="Météo-France"):
+        loader.rebuild(db_path=dbp)
+
+    con = schema.connect(dbp)
+    assert con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0] == 1
+    con.close()
 
 
 def test_update_is_atomic_on_failure(tmp_path, monkeypatch):
