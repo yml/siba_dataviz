@@ -1,6 +1,6 @@
 import pytest
 
-from siba.data import schema
+from siba.data import config, schema
 
 
 @pytest.fixture
@@ -24,3 +24,14 @@ def meteo_csv(tmp_path):
     ]
     path.write_text("\n".join([header, *rows]) + "\n", encoding="utf-8")
     return path
+
+
+@pytest.fixture(autouse=True)
+def _no_enki_dir(monkeypatch, tmp_path):
+    """Isole les tests du dossier _data/enki/ du poste de développement.
+
+    update()/rebuild() chargent les exports Enki présents sur disque : sans cela
+    le résultat des tests dépendrait des CSV locaux. Les tests qui visent
+    réellement ce chargement pointent explicitement vers un dossier temporaire.
+    """
+    monkeypatch.setattr(config, "ENKI_DIR", tmp_path / "enki-absent")

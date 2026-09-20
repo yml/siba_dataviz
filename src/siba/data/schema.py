@@ -74,6 +74,31 @@ def create_all(con: duckdb.DuckDBPyConnection) -> None:
     )
     con.execute(
         """
+        CREATE TABLE IF NOT EXISTS analyse_bacterio (
+            annee            INTEGER,
+            context_id       VARCHAR,
+            date_prelevement DATE,
+            date_fin         DATE,
+            heure_debut      VARCHAR,
+            heure_fin        VARCHAR,
+            point            VARCHAR,
+            latitude         DOUBLE,
+            longitude        DOUBLE,
+            laboratoire      VARCHAR,
+            etendue_eau      VARCHAR,
+            bassin_versant   VARCHAR,
+            justification    VARCHAR,
+            ecoli            DOUBLE,
+            ecoli_censure    VARCHAR,
+            ecoli_raw        VARCHAR,
+            entero           DOUBLE,
+            entero_censure   VARCHAR,
+            entero_raw       VARCHAR
+        )
+        """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS hc_period (
             start_date DATE,
             end_date   DATE,
@@ -143,7 +168,7 @@ def drop_all(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("DROP VIEW IF EXISTS v_meteo_interest")
     for t in (
         "ingest_log", "meteo_jour", "nappe_mesure", "station", "nappe_pluie_daily",
-        "hc_period", "interdiction_period",
+        "hc_period", "interdiction_period", "analyse_bacterio",
     ):
         con.execute(f"DROP TABLE IF EXISTS {t}")
 

@@ -508,3 +508,91 @@ def test_update_writes_ingest_log_with_date_range(tmp_path, monkeypatch):
         ("meteofrance", "meteo latest", "update", 3, dt.date(2025, 1, 1), dt.date(2025, 1, 2)),
     ]
     con.close()
+
+
+ENKI_HEADER = (
+    "ID,Date début,Date fin,Point,Latitude,Longitude,Sonde ou laboratoire,"
+    "Profondeur,Heure début,Heure fin,Étendue d’eau,Bassin versant,"
+    "Justification du point d’échantillonnage,Entérocoques,Escherichia coli\n"
+)
+ENKI_UNITS = ",,,,,,,,,,,,,UFC/100mL,UFC/100mL\n"
+
+
+def _enki_csv(path, rows):
+    path.write_text(ENKI_HEADER + ENKI_UNITS + "".join(rows), encoding="utf-8")
+
+
+def test_load_enki_parses_and_skips_units_row(tmp_path):
+    d = tmp_path / "enki"
+    d.mkdir()
+    _enki_csv(d / "Export_siba_2023.csv", [
+        "1,2023-01-19,2023-01-19,0804-CDL,44.6,-1.1,LPL,,09:00,09:05,E,BV,ND,63.0,327.0\n",
+        "2,2023-02-02,2023-02-02,0805-RDB,44.7,-1.0,SIBA,,10:00,10:05,E,BV,ND,<10.0,>2419.6\n",
+    ])
+    con = schema.connect(tmp_path / "e.duckdb")
+    schema.create_all(con)
+    n, lo, hi = loader._load_enki(con, d)
+    assert n == 2  # la ligne d'unités n'est pas une donnée
+    assert (lo, hi) == (dt.date(2023, 1, 19), dt.date(2023, 2, 2))
+    rows = con.execute(
+        "SELECT ecoli, ecoli_censure, entero, entero_censure FROM analyse_bacterio "
+        "ORDER BY date_prelevement"
+    ).fetchall()
+    con.close()
+    assert rows[0] == (327.0, "=", 63.0, "=")
+    # valeurs censurées : la borne est conservée ET signalée
+    assert rows[1] == (2419.6, ">", 10.0, "<")
+
+
+def test_load_enki_replaces_year_and_is_idempotent(tmp_path):
+    d = tmp_path / "enki"
+    d.mkdir()
+    f = d / "Export_siba_2023.csv"
+    _enki_csv(f, ["1,2023-01-19,2023-01-19,P,44.6,-1.1,LPL,,09:00,09:05,E,BV,ND,63.0,327.0\n"])
+    con = schema.connect(tmp_path / "e.duckdb")
+    schema.create_all(con)
+    loader._load_enki(con, d)
+    loader._load_enki(con, d)  # rejouer ne duplique pas
+    assert con.execute("SELECT COUNT(*) FROM analyse_bacterio").fetchone()[0] == 1
+
+    # un export corrigé remplace l'année au lieu de s'y ajouter
+    _enki_csv(f, [
+        "1,2023-01-19,2023-01-19,P,44.6,-1.1,LPL,,09:00,09:05,E,BV,ND,63.0,999.0\n",
+        "2,2023-03-01,2023-03-01,Q,44.7,-1.0,SIBA,,10:00,10:05,E,BV,ND,20.0,50.0\n",
+    ])
+    loader._load_enki(con, d)
+    n, ecoli = con.execute(
+        "SELECT COUNT(*), max(ecoli) FROM analyse_bacterio"
+    ).fetchone()
+    con.close()
+    assert (n, ecoli) == (2, 999.0)
+
+
+def test_load_enki_tolerates_missing_measure_columns(tmp_path):
+    # Le portail omet les colonnes de mesure pour les années sans analyse.
+    d = tmp_path / "enki"
+    d.mkdir()
+    (d / "Export_siba_2012.csv").write_text(
+        "ID,Date début,Date fin,Point,Latitude,Longitude,Sonde ou laboratoire,"
+        "Profondeur,Heure début,Heure fin,Étendue d’eau,Bassin versant,"
+        "Justification du point d’échantillonnage\n"
+        "9,2012-05-05,2012-05-05,P,44.6,-1.1,LPL,,09:00,09:05,E,BV,ND\n",
+        encoding="utf-8",
+    )
+    con = schema.connect(tmp_path / "e.duckdb")
+    schema.create_all(con)
+    n, _, _ = loader._load_enki(con, d)
+    got = con.execute("SELECT ecoli, entero FROM analyse_bacterio").fetchone()
+    con.close()
+    assert n == 1 and got == (None, None)
+
+
+def test_load_enki_missing_directory_deletes_nothing(tmp_path):
+    con = schema.connect(tmp_path / "e.duckdb")
+    schema.create_all(con)
+    con.execute("INSERT INTO analyse_bacterio (annee, point) VALUES (2023, 'P')")
+    n, lo, hi = loader._load_enki(con, tmp_path / "absent")
+    kept = con.execute("SELECT COUNT(*) FROM analyse_bacterio").fetchone()[0]
+    con.close()
+    assert (n, lo, hi) == (0, None, None)
+    assert kept == 1  # pas de dossier : on ne touche à rien

@@ -81,3 +81,12 @@ METEO_COLUMNS = [
     "HXI2", "QHXI2", "FXI3S", "QFXI3S", "DXI3S", "QDXI3S", "HXI3S", "QHXI3S",
     "DRR", "QDRR", "STATUS_FXI3S", "STATUS_DXI3S",
 ]
+
+#: Exports Enki (analyses bactériologiques), un CSV par année, déposés par
+#: ``scripts/fetch_enki.py``. Le portail est derrière un login : la récupération
+#: reste manuelle, le chargement est automatique.
+ENKI_DIR = DATA_DIR / "enki"
+
+#: Unité des analyses bactériologiques (constante dans l'export, pas stockée
+#: ligne à ligne).
+ENKI_UNIT = "UFC/100mL"

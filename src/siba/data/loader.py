@@ -6,6 +6,7 @@ import datetime as dt
 import tempfile
 import time
 import tomllib
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -144,6 +145,47 @@ def _load_events(con):
             ],
         )
     return len(hc), len(it)
+
+
+ENKI_COLUMNS = [
+    "annee", "context_id", "date_prelevement", "date_fin", "heure_debut",
+    "heure_fin", "point", "latitude", "longitude", "laboratoire", "etendue_eau",
+    "bassin_versant", "justification", "ecoli", "ecoli_censure", "ecoli_raw",
+    "entero", "entero_censure", "entero_raw",
+]
+
+
+def _load_enki(con, directory=None, *, read=sources.read_enki_csv):
+    """Charge les exports Enki annuels (analyses bactériologiques).
+
+    Chaque CSV annuel fait foi pour son année : on remplace l'année entière au
+    lieu d'upserter. Cela absorbe les corrections amont et les identifiants
+    dupliqués (un même ``context_id`` peut porter deux analyses) sans avoir à
+    inventer une clé primaire. Un dossier absent ne supprime rien.
+    """
+    directory = config.ENKI_DIR if directory is None else Path(directory)
+    if not directory.is_dir():
+        return 0, None, None
+
+    total = 0
+    dmin = dmax = None
+    collist = ", ".join(f'"{c}"' for c in ENKI_COLUMNS)
+    for path in sorted(directory.glob("Export_siba_*.csv")):
+        df = read(path)
+        if df.empty:
+            continue
+        for year in sorted({int(y) for y in df["annee"].dropna()}):
+            con.execute("DELETE FROM analyse_bacterio WHERE annee = ?", [year])
+        con.register("_enki_df", df[ENKI_COLUMNS])
+        con.execute(
+            f"INSERT INTO analyse_bacterio ({collist}) SELECT {collist} FROM _enki_df"
+        )
+        con.unregister("_enki_df")
+        total += len(df)
+        dates = pd.to_datetime(df["date_prelevement"], errors="coerce")
+        dmin, dmax = _span(dmin, dmax, _as_date(dates.min()), _as_date(dates.max()))
+        print(f"Enki          {path.name} … {len(df)} lignes")
+    return total, dmin, dmax
 
 
 def build_nappe_pluie_daily(con):
@@ -294,6 +336,7 @@ def update(db_path=None) -> None:
             schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
             schema.seed_stations(con)
             _load_events(con)
+            n_enki, e_lo, e_hi = _load_enki(con)
             year = dt.date.today().year
             # Prev + current year: a January run still picks up late-December points
             # and prior-year requalifications; the upsert absorbs the overlap.
@@ -306,6 +349,8 @@ def update(db_path=None) -> None:
             schema.create_event_views(con)
             _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "update", n_nappe, nmin, nmax)
             _log(con, "meteofrance", "meteo latest", "update", n_meteo, mmin, mmax)
+            if n_enki:
+                _log(con, "enki", "analyses bactério", "update", n_enki, e_lo, e_hi)
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")
@@ -329,6 +374,7 @@ def rebuild(db_path=None) -> None:
             schema.create_all(con)
             schema.seed_stations(con)
             _load_events(con)
+            n_enki, e_lo, e_hi = _load_enki(con)
             years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
             n_nappe, nmin, nmax = _load_nappe(con, years)
             n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
@@ -360,6 +406,8 @@ def rebuild(db_path=None) -> None:
             schema.create_event_views(con)
             _log(con, "hubeau", f"nappe {years[0]}-{years[-1]}", "rebuild", n_nappe, nmin, nmax)
             _log(con, "meteofrance", "meteo all", "rebuild", n_meteo, mmin, mmax)
+            if n_enki:
+                _log(con, "enki", "analyses bactério", "rebuild", n_enki, e_lo, e_hi)
             con.execute("COMMIT")
         except Exception:
             con.execute("ROLLBACK")

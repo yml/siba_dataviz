@@ -234,3 +234,46 @@ Données récupérées directement depuis les portails open data (voir
 - Fichier « latest » (année en cours) : <https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50>
 - Descriptif des champs : <https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv>
 - Poste utilisé : Cap-Ferret `33236002`
+
+---
+
+## `analyse_bacterio` — analyses bactériologiques (portail Enki)
+
+Un prélèvement par ligne. Source : exports annuels du portail Enki du SIBA
+(`scripts/fetch_enki.py`, derrière authentification), déposés dans
+`_data/enki/`. Chaque CSV annuel fait foi : le chargement **remplace l'année
+entière**, ce qui absorbe les corrections amont et les `context_id` dupliqués
+(un même prélèvement peut porter deux analyses) sans clé primaire artificielle.
+
+Unité des deux mesures : **UFC/100 mL**.
+
+| colonne | type | description |
+|---|---|---|
+| `annee` | INTEGER | année du fichier source ; clé de remplacement |
+| `context_id` | VARCHAR | identifiant Enki du prélèvement (**non unique**) |
+| `date_prelevement` | DATE | date de début du prélèvement |
+| `date_fin` | DATE | date de fin |
+| `heure_debut` / `heure_fin` | VARCHAR | heures (`hh:mm`) |
+| `point` | VARCHAR | point d'échantillonnage (ex. `0503-LEPONTEILS`) |
+| `latitude` / `longitude` | DOUBLE | coordonnées du point |
+| `laboratoire` | VARCHAR | sonde ou laboratoire ayant réalisé la mesure |
+| `etendue_eau` | VARCHAR | étendue d'eau |
+| `bassin_versant` | VARCHAR | bassin versant |
+| `justification` | VARCHAR | justification du point d'échantillonnage |
+| `ecoli` | DOUBLE | *Escherichia coli* (UFC/100 mL) |
+| `ecoli_censure` | VARCHAR | `<`, `=` ou `>` — voir ci-dessous |
+| `ecoli_raw` | VARCHAR | valeur brute telle qu'exportée |
+| `entero` | DOUBLE | entérocoques (UFC/100 mL) |
+| `entero_censure` | VARCHAR | `<`, `=` ou `>` |
+| `entero_raw` | VARCHAR | valeur brute |
+
+**Valeurs censurées.** Le laboratoire rend parfois `<10.0` (sous la limite de
+détection) ou `>2419.6` (plafond de quantification Colilert/IDEXX). La borne est
+stockée dans `ecoli` / `entero` **et** signalée par `*_censure` : filtrer sur
+`censure = '='` pour ne garder que les valeurs exactes, et ne pas traiter un
+`>2419.6` comme un 2419,6 — ce sont justement les épisodes les plus contaminés.
+
+**Couverture.** Les analyses commencent en 2014 : le portail n'exporte même pas
+les colonnes de mesure pour 2012-2013 (elles valent alors NULL). Les colonnes
+météo de l'export (ciel, précipitations, vagues, vent) ne sont jamais
+renseignées côté source et ne sont donc pas reprises ici.
