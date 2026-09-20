@@ -1,6 +1,6 @@
 import pytest
 
-from siba.db import schema
+from siba.data import schema
 
 
 @pytest.fixture

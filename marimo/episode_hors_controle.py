@@ -15,7 +15,7 @@ def _():
     import matplotlib.dates as mdates
     from scipy import stats
 
-    from siba.db.config import DB_PATH
+    from siba.data.config import DB_PATH
 
     plt.style.use("seaborn-v0_8-whitegrid")
     return DB_PATH, duckdb, mdates, mo, np, pd, plt, stats
@@ -33,10 +33,17 @@ def _(mo):
     graphiques (timelines, superposition, nuage) et la comparaison statistique
     (boxplots + Mann-Whitney) se recalculent pour la fenêtre sélectionnée.
 
-    **ECPP vs ECPM** — si les infiltrations étaient météoriques (ECPM), le réseau
-    reviendrait à la normale peu après l'arrêt des pluies ; si elles viennent de la
-    nappe (ECPP), la surcharge dure tant que la nappe est haute. Le nuage RR7 ↔
-    nappe et l'écart des médianes aident à trancher.
+    **ECPP vs ECPM** — les **ECPM** (Eaux Claires Parasites Météoriques) sont des
+    infiltrations liées à la pluie : le réseau revient à la normale peu après
+    l'arrêt des précipitations. Les **ECPP** (Eaux Claires Parasites Permanentes)
+    viennent de la nappe : la surcharge dure tant que la nappe est haute. Le nuage
+    RR7 ↔ nappe et l'écart des médianes aident à trancher.
+
+    **Sources** — nappe : [Hub'eau piézométrie](https://hubeau.eaufrance.fr/page/api-piezometrie)
+    (stations ADES [Blagon 08262X0023/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F),
+    [Piraillan 08257X0086/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F)) ;
+    pluie : [Météo-France données ouvertes](https://meteo.data.gouv.fr/) (poste
+    Cap-Ferret 33236002).
     """)
     return
 
@@ -87,11 +94,19 @@ def _(episode, episodes, margin, pd):
 
 
 @app.cell
-def _(NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
+def _():
+    # Largeur commune à toutes les figures : garantit leur alignement vertical.
+    FIG_W = 14
+    return (FIG_W,)
+
+
+@app.cell
+def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
         colors = ["#0066cc", "#cc6600"]
-        fig, axes = plt.subplots(len(NAPPE_COLS), 1, figsize=(14, 7), sharex=True)
+        fig, axes = plt.subplots(len(NAPPE_COLS), 1, figsize=(FIG_W, 7), sharex=True,
+                                 constrained_layout=True)
         for ax, (col, color) in zip(axes, zip(NAPPE_COLS, colors)):
             s = d[col].dropna()
             ax.plot(s.index, s.values, color=color, linewidth=1.5, label=col)
@@ -105,8 +120,7 @@ def _(NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
         axes[-1].set_xlabel("Date", fontsize=11)
         axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
         fig.suptitle("Timeline nappe — épisode sélectionné", fontsize=14,
-                     fontweight="bold", y=1.01)
-        fig.tight_layout()
+                     fontweight="bold")
         return fig
 
     _plot()
@@ -114,10 +128,10 @@ def _(NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
 
 
 @app.cell
-def _(ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
+def _(FIG_W, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
-        fig, ax = plt.subplots(figsize=(14, 5))
+        fig, ax = plt.subplots(figsize=(FIG_W, 5), constrained_layout=True)
         ax.bar(d.index, d["RR"].fillna(0), width=1, alpha=0.5,
                color="steelblue", label="Pluie journalière (RR)")
         ax.plot(d.index, d["RR7"], color="darkblue", linewidth=2,
@@ -130,7 +144,6 @@ def _(ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
         ax.set_title("Timeline pluie — Cap-Ferret", fontsize=13, fontweight="bold")
         ax.legend(loc="upper right")
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-        fig.tight_layout()
         return fig
 
     _plot()
@@ -138,11 +151,11 @@ def _(ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
 
 
 @app.cell
-def _(NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
+def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
         colors = ["#0066cc", "#cc6600"]
-        fig, ax1 = plt.subplots(figsize=(14, 6))
+        fig, ax1 = plt.subplots(figsize=(FIG_W, 6), constrained_layout=True)
         for col, color in zip(NAPPE_COLS, colors):
             s = d[col].dropna()
             ax1.plot(s.index, s.values, color=color, linewidth=1.5, label=f"Nappe {col}")
@@ -161,7 +174,6 @@ def _(NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
         ax1.set_title("Superposition nappe + RR7", fontsize=13, fontweight="bold")
-        fig.tight_layout()
         return fig
 
     _plot()
@@ -169,11 +181,12 @@ def _(NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
 
 
 @app.cell
-def _(NAPPE_COLS, df, hc_end, hc_start, plt):
+def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, plt):
     def _plot():
         dd = df.dropna(subset=["RR7"]).copy()
         dd["sel_hc"] = (dd.index >= hc_start) & (dd.index <= hc_end)
-        fig, axes = plt.subplots(1, len(NAPPE_COLS), figsize=(14, 5))
+        fig, axes = plt.subplots(1, len(NAPPE_COLS), figsize=(FIG_W, 5),
+                                 constrained_layout=True)
         for ax, col in zip(axes, NAPPE_COLS):
             sub = dd.dropna(subset=[col])
             normal = sub[~sub["sel_hc"]]
@@ -188,9 +201,8 @@ def _(NAPPE_COLS, df, hc_end, hc_start, plt):
             ax.invert_yaxis()
             ax.grid(True, alpha=0.25)
             ax.legend()
-        fig.suptitle("RR7 vs profondeur de nappe (record complet, épisode en rouge)",
-                     fontsize=14, fontweight="bold", y=1.02)
-        fig.tight_layout()
+        fig.suptitle("RR7 vs profondeur de nappe (tout l'historique, épisode en rouge)",
+                     fontsize=14, fontweight="bold")
         return fig
 
     _plot()
@@ -198,7 +210,7 @@ def _(NAPPE_COLS, df, hc_end, hc_start, plt):
 
 
 @app.cell
-def _(NAPPE_COLS, df, hc_end, hc_start, np, plt):
+def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, np, plt):
     def _plot():
         a = df.copy()
         a["periode"] = np.where(
@@ -208,7 +220,8 @@ def _(NAPPE_COLS, df, hc_end, hc_start, np, plt):
         variables = NAPPE_COLS + ["RR7"]
         order = ["Normal", "Hors de contrôle"]
         colors = {"Normal": "steelblue", "Hors de contrôle": "red"}
-        fig, axes = plt.subplots(1, len(variables), figsize=(5 * len(variables), 5))
+        fig, axes = plt.subplots(1, len(variables), figsize=(FIG_W, 5),
+                                 constrained_layout=True)
         for ax, var in zip(axes, variables):
             a2 = a[[var, "periode"]].dropna()
             groups = [a2[a2["periode"] == g][var].values for g in order]
@@ -225,9 +238,8 @@ def _(NAPPE_COLS, df, hc_end, hc_start, np, plt):
             ax.set_title(var, fontsize=12, fontweight="bold")
             if var in NAPPE_COLS:
                 ax.invert_yaxis()
-        fig.suptitle("Épisode « hors de contrôle » vs reste du record",
-                     fontsize=14, fontweight="bold", y=1.02)
-        fig.tight_layout()
+        fig.suptitle("Épisode « hors de contrôle » vs reste de l'historique",
+                     fontsize=14, fontweight="bold")
         return fig
 
     _plot()
@@ -272,17 +284,18 @@ def _(mo):
     mo.md("""
     ## Risque joint : nappe (Blagon) × pluie (RR7)
 
-    Part de jours « hors de contrôle » (`in_hc`, tout le record) selon la profondeur
-    de nappe Blagon **et** le cumul de pluie 7 jours, en grille 2D. Nappe haute en
-    haut, pluie croissante vers la droite ; les cellules de moins de 5 jours sont
-    masquées. Le risque se concentre en **haut à droite** (nappe haute + pluie
-    élevée) : une nappe haute est nécessaire, la pluie amplifie.
+    Part de jours « hors de contrôle » (`in_hc`) sur **tout l'historique** — tous
+    les épisodes confondus, **indépendamment du sélecteur ci-dessus** — selon la
+    profondeur de nappe Blagon **et** le cumul de pluie 7 jours, en grille 2D.
+    Nappe haute en haut, pluie croissante vers la droite ; les cellules de moins de
+    5 jours sont masquées. Le risque se concentre en **haut à droite** (nappe haute
+    + pluie élevée) : une nappe haute est nécessaire, la pluie amplifie.
     """)
     return
 
 
 @app.cell
-def _(df, np, pd, plt):
+def _(FIG_W, df, np, pd, plt):
     def _heat():
         d = df.dropna(subset=["Blagon", "RR7"]).copy()
         depth_edges = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
@@ -295,7 +308,7 @@ def _(df, np, pd, plt):
         m = np.where(cnt.to_numpy(dtype=float) < 5, np.nan,
                      prob.to_numpy(dtype=float))
 
-        fig, ax = plt.subplots(figsize=(11, 7))
+        fig, ax = plt.subplots(figsize=(FIG_W, 8), constrained_layout=True)
         cmap = plt.get_cmap("Reds").copy()
         cmap.set_bad("#f0f0f0")
         im = ax.imshow(m, cmap=cmap, vmin=0, vmax=100, aspect="auto",
@@ -316,11 +329,12 @@ def _(df, np, pd, plt):
         ax.set_xlabel("Cumul pluie 7 jours RR7 (mm)", fontsize=11)
         ax.set_ylabel("Profondeur nappe Blagon (m) — haut = nappe haute", fontsize=11)
         ax.set_title(
-            "Risque « hors de contrôle » : nappe (Blagon) × pluie (RR7)\n"
-            "(cellules < 5 jours masquées ; % = part de jours HC)",
-            fontsize=13, fontweight="bold",
+            "Risque « hors de contrôle » — tous épisodes, tout l'historique "
+            "(indépendant du sélecteur)\n"
+            "nappe (Blagon) × pluie (RR7) ; cellules < 5 jours masquées ; "
+            "% = part de jours HC",
+            fontsize=12, fontweight="bold",
         )
-        fig.tight_layout()
         return fig
 
     _heat()

@@ -13,7 +13,7 @@ def _():
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
 
-    from siba.db.config import DB_PATH
+    from siba.data.config import DB_PATH
 
     return DB_PATH, duckdb, mdates, mo, pd, plt
 
@@ -24,11 +24,17 @@ def _(DB_PATH, mo):
         f"""
     # Vue d'ensemble multi-années — nappe + pluie
 
-    Small multiples : un sous-graphe par année, la profondeur de nappe
-    (axe gauche, inversé) et le cumul de pluie sur 7 jours RR7 (axe droit).
-    Les bandes rouges marquent les périodes « hors de contrôle » (HC) du réseau EU.
+    Un sous-graphe par année : la profondeur de nappe (axe gauche, inversé) et le
+    cumul de pluie sur 7 jours RR7 (axe droit). Les bandes rouges marquent les
+    périodes « hors de contrôle » (HC) du réseau EU.
 
-    Source : `{DB_PATH}` — tables `nappe_pluie_daily` et `hc_period`.
+    **Provenance des données** — nappe : [Hub'eau piézométrie](https://hubeau.eaufrance.fr/page/api-piezometrie)
+    (stations ADES [Blagon 08262X0023/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F),
+    [Piraillan 08257X0086/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F)) ;
+    pluie : [Météo-France données ouvertes](https://meteo.data.gouv.fr/) (poste
+    Cap-Ferret 33236002). Détail des champs : `DATA_DICTIONARY.md`.
+
+    Base locale : `{DB_PATH}` — tables `nappe_pluie_daily` et `hc_period`.
     La table journalière démarre en 2015 (`DAILY_START`) ; l'épisode HC 2014
     n'apparaît donc pas ici.
     """

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from siba.db import config, schema
+from siba.data import config, schema
 
 
 def _tables(con):

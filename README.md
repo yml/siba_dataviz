@@ -4,6 +4,30 @@ Analyse croisée des nappes phréatiques et des précipitations sur le Bassin
 d'Arcachon. Les données viennent de Hub'eau (piézomètres) et de Météo-France
 (poste de Cap-Ferret), avec un cache local dans `_data/`.
 
+## Sources des données
+
+Tout est récupéré directement depuis les portails open data (voir
+`src/siba/data/config.py`) :
+
+**Nappe — Hub'eau (piézométrie)**
+
+- API chroniques : <https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques>
+- Documentation : <https://hubeau.eaufrance.fr/page/api-piezometrie>
+- Stations (fiches ADES) : Blagon (Lanton) `08262X0023/F`
+  (<https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F>), Piraillan
+  (Lège-Cap-Ferret) `08257X0086/F`
+  (<https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F>)
+
+**Pluie — Météo-France (données climatologiques quotidiennes, Gironde)**
+
+- Portail : <https://meteo.data.gouv.fr/>
+- Fichiers utilisés : `previous` (1950-2024)
+  <https://www.data.gouv.fr/api/1/datasets/r/b0e78f3d-9085-4d6d-a47d-6d942f5e9a54>
+  et `latest` (année en cours)
+  <https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50>
+- Descriptif des champs : <https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv>
+- Poste utilisé : Cap-Ferret `33236002`
+
 ## Organisation
 
 ```
@@ -70,17 +94,17 @@ Passer `max_age_hours=0` force le rechargement, `float("inf")` fige le cache
 (utile hors ligne). Si la source est injoignable, le cache existant est relu
 plutôt que de renvoyer un résultat vide.
 
-## Base DuckDB (`siba.db`)
+## Base DuckDB (`siba.data`)
 
 Chargement des données directement depuis Hub'eau et Météo-France vers une base
 DuckDB locale `_data/siba.duckdb`, sans passer par le cache CSV.
 
 ```sh
 # reconstruire la base de zéro
-uv run python -m siba.db rebuild
+uv run python -m siba.data rebuild
 
 # mise à jour incrémentale (année précédente + courante, fichier météo « latest »)
-uv run python -m siba.db update
+uv run python -m siba.data update
 ```
 
 `rebuild` charge la nappe de 2010 à l'année en cours et les fichiers

@@ -67,7 +67,10 @@ NAPPE_BACKOFF = 1.0
 #: lors d'un rebuild qui enchaîne les années. Mis à 0 dans les tests.
 NAPPE_REQUEST_DELAY = 1.0
 
-#: En-tête brut complet des fichiers Q_33_*_RR-T-Vent (60 colonnes).
+#: En-tête brut complet des fichiers Météo-France Q_33_*_RR-T-Vent : les 60 noms
+#: de colonnes, dans l'ordre du fichier source. Signification de chaque champ :
+#: descriptif officiel (``METEO_DESCRIPTOR_URL``, mis en cache dans ``_data/``)
+#: et ``DATA_DICTIONARY.md``.
 METEO_COLUMNS = [
     "NUM_POSTE", "NOM_USUEL", "LAT", "LON", "ALTI", "AAAAMMJJ",
     "RR", "QRR", "TN", "QTN", "HTN", "QHTN", "TX", "QTX", "HTX", "QHTX",

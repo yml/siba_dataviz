@@ -285,7 +285,7 @@ def update(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
     con = schema.connect(db_path)
     try:
-        print(f"siba.db update → {db_path}")
+        print(f"siba.data update → {db_path}")
         # Atomic: schema changes, loads, the derived rebuild and the log rows run
         # in one transaction so a mid-run failure (e.g. meteo after nappe) rolls
         # back and never leaves raw and derived data inconsistent.
@@ -319,7 +319,7 @@ def rebuild(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
     con = schema.connect(db_path)
     try:
-        print(f"siba.db rebuild → {db_path}")
+        print(f"siba.data rebuild → {db_path}")
         # Atomic: drop/create/load run in one transaction so a mid-run failure
         # (e.g. a Hub'eau timeout) rolls back and preserves the existing data
         # instead of leaving an emptied DB. DuckDB rolls back DDL and DML together.

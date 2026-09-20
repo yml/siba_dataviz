@@ -1,7 +1,7 @@
 import tomllib
 from pathlib import Path
 
-from siba.db import config
+from siba.data import config
 
 
 def test_events_toml_fixture_ships_and_parses():

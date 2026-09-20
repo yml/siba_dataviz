@@ -1,8 +1,10 @@
 # Dictionnaire des données — `_data/siba.duckdb`
 
-Base DuckDB alimentée par `siba.db` (voir README). Deux sources :
-Hub'eau (chroniques piézométriques) et Météo-France (données quotidiennes
-RR-T-Vent, Gironde). Ce document décrit chaque table et chaque colonne.
+Base DuckDB `_data/siba.duckdb`, alimentée par le programme Python `siba.data`
+(le paquet `src/siba/data/` — ce n'est pas le nom de la base ; voir README).
+Deux sources : Hub'eau (chroniques piézométriques) et Météo-France (données
+quotidiennes RR-T-Vent, Gironde). Ce document décrit chaque table et chaque
+colonne. URLs des sources : voir [Sources](#sources) en bas de page.
 
 Le descriptif officiel des champs Météo-France est mis en cache dans
 `_data/Q_descriptif_champs_RR-T-Vent.csv` (téléchargé depuis data.gouv / OVH).
@@ -166,7 +168,7 @@ Sélection lisible des colonnes utiles pour les stations `station.of_interest`
 
 ## `hc_period` — périodes « hors de contrôle » (HC) du réseau eaux usées
 
-Données curées à la main (fixture `src/siba/db/fixtures/events.toml`), remplacées
+Données curées à la main (fixture `src/siba/data/fixtures/events.toml`), remplacées
 intégralement à chaque `update` / `rebuild`. Une ligne par période HC signalée.
 
 | colonne | type | description |
@@ -209,3 +211,26 @@ augmentée de deux drapeaux booléens par jour, pour l'analyse de corrélation.
 | *(colonnes de `nappe_pluie_daily`)* | | `date`, `Blagon`, `Piraillan`, `rr`, `rr_7d`, `rr_14d`, `rr_28d`, `rr_56d` |
 | `in_hc` | BOOLEAN | le jour tombe dans au moins une période `hc_period` |
 | `in_interdiction` | BOOLEAN | le jour tombe dans au moins une période `interdiction_period` |
+
+---
+
+## Sources
+
+Données récupérées directement depuis les portails open data (voir
+`src/siba/data/config.py`).
+
+### Nappe — Hub'eau (piézométrie)
+
+- API chroniques : <https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques>
+- Documentation : <https://hubeau.eaufrance.fr/page/api-piezometrie>
+- Stations (fiches ADES) :
+  - Blagon (Lanton) `08262X0023/F` : <https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F>
+  - Piraillan (Lège-Cap-Ferret) `08257X0086/F` : <https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F>
+
+### Pluie — Météo-France (données climatologiques quotidiennes, Gironde)
+
+- Portail open data : <https://meteo.data.gouv.fr/>
+- Fichier « previous » (1950-2024) : <https://www.data.gouv.fr/api/1/datasets/r/b0e78f3d-9085-4d6d-a47d-6d942f5e9a54>
+- Fichier « latest » (année en cours) : <https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50>
+- Descriptif des champs : <https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv>
+- Poste utilisé : Cap-Ferret `33236002`

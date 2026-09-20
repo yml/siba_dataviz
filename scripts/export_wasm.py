@@ -28,7 +28,7 @@ from pathlib import Path
 
 import duckdb
 
-from siba.db.config import DB_PATH
+from siba.data.config import DB_PATH
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = REPO / "marimo" / "episode_hors_controle.py"
@@ -42,7 +42,7 @@ OLD_IMPORTS = '''    import duckdb
     import matplotlib.dates as mdates
     from scipy import stats
 
-    from siba.db.config import DB_PATH
+    from siba.data.config import DB_PATH
 
     plt.style.use("seaborn-v0_8-whitegrid")
     return DB_PATH, duckdb, mdates, mo, np, pd, plt, stats'''
@@ -174,7 +174,7 @@ def main() -> int:
     if not DB_PATH.exists():
         raise SystemExit(
             f"Base introuvable : {DB_PATH}. Lancer d'abord "
-            "`uv run python -m siba.db rebuild` (ou `update`)."
+            "`uv run python -m siba.data rebuild` (ou `update`)."
         )
     build_export_notebook()
     run_wasm_export()

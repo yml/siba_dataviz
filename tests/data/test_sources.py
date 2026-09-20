@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 import requests
 
-from siba.db import config, sources
+from siba.data import config, sources
 
 NAPPE_COLS = [
     "code_bss", "date_mesure", "niveau_nappe_eau", "profondeur_nappe",

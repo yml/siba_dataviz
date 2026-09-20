@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from siba.db import config, loader, schema
+from siba.data import config, loader, schema
 
 
 def _con(tmp_path):
