@@ -30,7 +30,9 @@ def _(DB_PATH, mo):
 
     Choisir la période, le piézomètre et la fenêtre de cumul de pluie ci-dessous ;
     seules les cellules qui en dépendent sont recalculées. Les bandes rouges
-    marquent les périodes « hors de contrôle » (HC) du réseau EU.
+    marquent les périodes « hors de contrôle » (HC) du réseau EU ; les
+    verticales violettes, les jours où au moins un prélèvement dépasse
+    2 000 UFC/100 mL d'*E. coli*.
     """)
     return
 
@@ -114,10 +116,25 @@ def _(DB_PATH, duckdb, fenetre, periode):
             """,
             [date_start, date_end, date_start, date_end],
         ).df()
+        # Jours où au moins un point dépasse 2 000 UFC/100 mL d'E. coli.
+        # Groupé par jour : plusieurs points contaminés le même jour ne doivent
+        # tracer qu'une seule verticale.
+        contam = _con.execute(
+            """
+            SELECT date_prelevement AS jour,
+                   count(*)         AS n_points,
+                   max(ecoli)       AS ecoli_max
+            FROM analyse_bacterio
+            WHERE ecoli > 2000 AND date_prelevement BETWEEN ? AND ?
+            GROUP BY date_prelevement
+            ORDER BY jour
+            """,
+            [date_start, date_end],
+        ).df()
     finally:
         _con.close()
     df = df.set_index("date")
-    return date_end, date_start, df, hc, rr_col, rr_label
+    return contam, date_end, date_start, df, hc, rr_col, rr_label
 
 
 @app.cell
@@ -159,7 +176,7 @@ def _(df, mo, piezo, rr_col, rr_label, seuil):
 
 
 @app.cell
-def _(df, hc, piezo, plt, rr_col, rr_label, seuil):
+def _(contam, df, hc, piezo, plt, rr_col, rr_label, seuil):
     def _plot():
         fig, ax = plt.subplots(figsize=(11, 4.5), constrained_layout=True)
 
@@ -170,6 +187,13 @@ def _(df, hc, piezo, plt, rr_col, rr_label, seuil):
                 zorder=0, label="Hors de contrôle" if i == 0 else None,
             )
 
+        # Prélèvements très contaminés : une verticale par jour concerné.
+        for i, (_, c) in enumerate(contam.iterrows()):
+            ax.axvline(
+                c["jour"], color="purple", linewidth=0.9, alpha=0.8, zorder=1,
+                label="E. coli > 2000 UFC/100 mL" if i == 0 else None,
+            )
+
         serie = df[piezo.value].dropna()
         if len(serie) > 0:
             ax.plot(serie.index, serie.values, color="#0066cc", linewidth=1.1,
@@ -177,7 +201,7 @@ def _(df, hc, piezo, plt, rr_col, rr_label, seuil):
         ax.invert_yaxis()  # profondeur : vers le bas = nappe plus basse
         ax.set_ylabel("Prof. nappe (m)", color="#0066cc")
         ax.set_title(f"{piezo.value} vs cumul de pluie {rr_label}")
-        if len(hc) or len(serie):
+        if len(hc) or len(contam) or len(serie):
             ax.legend(loc="upper right", fontsize=9)
 
         ax2 = ax.twinx()
@@ -238,8 +262,15 @@ def _(mo):
     mo.md("""
     ## Analyses bactériologiques par point
 
-    Extrêmes d'*E. coli* et d'entérocoques (UFC/100 mL) sur la période choisie,
-    depuis `analyse_bacterio` (portail Enki).
+    Une ligne par **année et par point**, pour les seuls couples où *E. coli*
+    a dépassé **2 000 UFC/100 mL** au moins une fois. Source : `analyse_bacterio`
+    (portail Enki).
+
+    C'est la queue de distribution qui réagit aux épisodes HC, pas la médiane :
+    à saison comparable, la fréquence des dépassements de **1 000** UFC/100 mL
+    double pendant un HC et le mois qui suit (7,1 % contre 3,5 %, p = 0,03).
+    À **2 000** l'écart va dans le même sens mais n'est plus significatif
+    (3,7 % contre 1,4 %, p = 0,07) — les effectifs deviennent trop faibles.
 
     La colonne `*_max_cens` indique comment lire le maximum : `=` valeur exacte,
     `>` **plafond de quantification atteint** (le vrai maximum est plus élevé,
@@ -255,8 +286,10 @@ def _(DB_PATH, date_end, date_start, duckdb, mo):
         try:
             out = con.execute(
                 """
-                SELECT point,
+                SELECT annee,
+                       point,
                        count(ecoli)                     AS n,
+                       count(*) FILTER (WHERE ecoli > 2000) AS n_sup_2000,
                        min(ecoli)                       AS ecoli_min,
                        max(ecoli)                       AS ecoli_max,
                        arg_max(ecoli_censure, ecoli)    AS ecoli_max_cens,
@@ -266,9 +299,9 @@ def _(DB_PATH, date_end, date_start, duckdb, mo):
                        arg_max(entero_censure, entero)  AS entero_max_cens
                 FROM analyse_bacterio
                 WHERE date_prelevement BETWEEN ? AND ?
-                GROUP BY point
-                HAVING count(ecoli) > 0
-                ORDER BY ecoli_max DESC
+                GROUP BY annee, point
+                HAVING max(ecoli) > 2000
+                ORDER BY annee DESC, ecoli_max DESC
                 """,
                 [date_start, date_end],
             ).df()
@@ -276,7 +309,8 @@ def _(DB_PATH, date_end, date_start, duckdb, mo):
             con.close()
         if out.empty:
             return mo.md(
-                "**Aucune analyse sur la période.** Récupérer les exports Enki :\n"
+                "**Aucun dépassement de 2 000 UFC/100 mL sur la période.** "
+                "Si la table est vide, récupérer les exports Enki :\n"
                 "`uv run python scripts/fetch_enki.py --all`, puis `make update`."
             )
         return out
@@ -294,17 +328,41 @@ def _(mo):
     contexte : cumuls de pluie, profondeur de nappe, et appartenance à un
     épisode « hors de contrôle ». C'est l'unité d'analyse utile — comparer des
     médianes HC/hors-HC mélange les saisons et les programmes de prélèvement.
+
+    Lecture des colonnes d'événement :
+
+    - `en_hc` : le prélèvement tombe dans un épisode HC.
+    - `hc_mois_avant` : un épisode HC était en cours dans les 30 jours
+      précédents. Les prélèvements étant mensuels, un HC clos trois semaines
+      plus tôt reste une explication plausible. Cette colonne englobe `en_hc`.
+    - `j_depuis_hc` : jours écoulés depuis la fin du dernier épisode HC.
+      `0` = prélèvement pendant l'épisode, `NULL` = aucun HC avant cette date.
+      C'est la colonne qui discrimine vraiment : `hc_mois_avant` est binaire,
+      le délai dit à quelle distance on se trouve.
+
+    Position dans le cycle de la nappe, calculée sur le piézomètre sélectionné :
+
+    - `jour_min_local` : date du minimum de profondeur dans la fenêtre
+      ±45 jours autour du prélèvement. `NULL` quand ce minimum tombe sur un
+      bord de fenêtre : la nappe monte encore au-delà, il n'y a pas de pic
+      local à cette date.
+    - `nappe_min_local_m` : profondeur à ce minimum (nappe la plus **haute**).
+    - `ecart_min_local_j` : jours entre ce minimum et le prélèvement. Positif =
+      le minimum est passé avant, négatif = il arrive après. Proche de `0`, le
+      prélèvement coïncide avec les hautes eaux locales.
     """)
     return
 
 
 @app.cell
-def _(DB_PATH, date_end, date_start, duckdb, mo):
+def _(DB_PATH, date_end, date_start, duckdb, mo, piezo):
     def _contexte_pics():
+        # piezo.value vient des colonnes de la base, pas d'une saisie libre.
+        col = piezo.value
         con = duckdb.connect(str(DB_PATH), read_only=True)
         try:
             out = con.execute(
-                """
+                f"""
                 WITH pics AS (
                     SELECT point,
                            arg_max(date_prelevement, ecoli) AS jour,
@@ -323,9 +381,42 @@ def _(DB_PATH, date_end, date_start, duckdb, mo):
                        EXISTS (
                            SELECT 1 FROM hc_period h
                            WHERE p.jour BETWEEN h.start_date AND h.end_date
-                       ) AS en_hc
+                       ) AS en_hc,
+                       -- Prélèvements mensuels : un HC clos quelques semaines
+                       -- plus tôt peut encore expliquer la contamination.
+                       EXISTS (
+                           SELECT 1 FROM hc_period h
+                           WHERE h.start_date <= p.jour
+                             AND h.end_date   >= p.jour - INTERVAL 1 MONTH
+                       ) AS hc_mois_avant,
+                       -- 0 = prélèvement pendant l'épisode ; NULL = aucun HC avant.
+                       (SELECT min(greatest(0, datediff('day', h.end_date, p.jour)))
+                        FROM hc_period h
+                        WHERE h.start_date <= p.jour)     AS j_depuis_hc,
+                       m.jour_min                         AS jour_min_local,
+                       round(m.prof_min, 2)               AS nappe_min_local_m,
+                       datediff('day', m.jour_min, p.jour) AS ecart_min_local_j
                 FROM pics p
                 LEFT JOIN nappe_pluie_daily d ON d."date" = p.jour
+                -- Nappe la moins profonde (= la plus haute) dans la fenêtre
+                -- ±45 jours autour du prélèvement.
+                LEFT JOIN LATERAL (
+                    SELECT a.jour_min, a.prof_min
+                    FROM (
+                        SELECT arg_min(w."date", w."{col}") AS jour_min,
+                               min(w."{col}")               AS prof_min,
+                               min(w."date")                AS win_start,
+                               max(w."date")                AS win_end
+                        FROM nappe_pluie_daily w
+                        WHERE w."date" BETWEEN p.jour - INTERVAL 45 DAY
+                                           AND p.jour + INTERVAL 45 DAY
+                          AND w."{col}" IS NOT NULL
+                    ) a
+                    -- Minimum au bord de la fenêtre : la nappe monte encore
+                    -- au-delà, ce n'est pas un minimum local. Zéro ligne ici
+                    -- laisse les colonnes à NULL via le LEFT JOIN.
+                    WHERE a.jour_min > a.win_start AND a.jour_min < a.win_end
+                ) m ON TRUE
                 ORDER BY p.ecoli_max DESC
                 """,
                 [date_start, date_end],

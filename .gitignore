@@ -16,3 +16,13 @@ marimo/layouts/
 # WASM export artifacts (regenerate: make export-wasm)
 results/wasm/
 marimo/episode_hors_controle_export.py
+
+# Exports générés depuis les notebooks
+results/exports/
+
+# Specs et plans : jamais commités
+docs/superpowers/
+
+# Config locale d'outils / éditeur
+.claude/
+.vscode/
