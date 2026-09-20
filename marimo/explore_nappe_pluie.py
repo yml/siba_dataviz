@@ -19,8 +19,7 @@ def _():
 
 @app.cell
 def _(DB_PATH, mo):
-    mo.md(
-        f"""
+    mo.md(f"""
     # Nappe + pluie — exploration réactive
 
     Les données viennent de la base DuckDB `{DB_PATH}` (table `nappe_pluie_daily`,
@@ -32,8 +31,7 @@ def _(DB_PATH, mo):
     Choisir la période, le piézomètre et la fenêtre de cumul de pluie ci-dessous ;
     seules les cellules qui en dépendent sont recalculées. Les bandes rouges
     marquent les périodes « hors de contrôle » (HC) du réseau EU.
-    """
-    )
+    """)
     return
 
 
@@ -232,6 +230,113 @@ def _(DB_PATH, date_end, date_start, duckdb, piezo, rr_col, seuil):
             con.close()
 
     _annuel()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Analyses bactériologiques par point
+
+    Extrêmes d'*E. coli* et d'entérocoques (UFC/100 mL) sur la période choisie,
+    depuis `analyse_bacterio` (portail Enki).
+
+    La colonne `*_max_cens` indique comment lire le maximum : `=` valeur exacte,
+    `>` **plafond de quantification atteint** (le vrai maximum est plus élevé,
+    typiquement `>2419.6` en Colilert), `<` sous la limite de détection.
+    """)
+    return
+
+
+@app.cell
+def _(DB_PATH, date_end, date_start, duckdb, mo):
+    def _par_point():
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        try:
+            out = con.execute(
+                """
+                SELECT point,
+                       count(ecoli)                     AS n,
+                       min(ecoli)                       AS ecoli_min,
+                       max(ecoli)                       AS ecoli_max,
+                       arg_max(ecoli_censure, ecoli)    AS ecoli_max_cens,
+                       arg_max(date_prelevement, ecoli) AS jour_ecoli_max,
+                       min(entero)                      AS entero_min,
+                       max(entero)                      AS entero_max,
+                       arg_max(entero_censure, entero)  AS entero_max_cens
+                FROM analyse_bacterio
+                WHERE date_prelevement BETWEEN ? AND ?
+                GROUP BY point
+                HAVING count(ecoli) > 0
+                ORDER BY ecoli_max DESC
+                """,
+                [date_start, date_end],
+            ).df()
+        finally:
+            con.close()
+        if out.empty:
+            return mo.md(
+                "**Aucune analyse sur la période.** Récupérer les exports Enki :\n"
+                "`uv run python scripts/fetch_enki.py --all`, puis `make update`."
+            )
+        return out
+
+    _par_point()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ### Contexte pluie / nappe le jour du pic de contamination
+
+    Pour chaque point, le jour où *E. coli* est maximal, replacé dans son
+    contexte : cumuls de pluie, profondeur de nappe, et appartenance à un
+    épisode « hors de contrôle ». C'est l'unité d'analyse utile — comparer des
+    médianes HC/hors-HC mélange les saisons et les programmes de prélèvement.
+    """)
+    return
+
+
+@app.cell
+def _(DB_PATH, date_end, date_start, duckdb, mo):
+    def _contexte_pics():
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        try:
+            out = con.execute(
+                """
+                WITH pics AS (
+                    SELECT point,
+                           arg_max(date_prelevement, ecoli) AS jour,
+                           max(ecoli)                       AS ecoli_max,
+                           arg_max(ecoli_censure, ecoli)    AS cens
+                    FROM analyse_bacterio
+                    WHERE date_prelevement BETWEEN ? AND ?
+                    GROUP BY point
+                    HAVING count(ecoli) > 0
+                )
+                SELECT p.point, p.jour, p.ecoli_max, p.cens,
+                       round(d.rr_7d, 1)   AS rr_7d,
+                       round(d.rr_28d, 1)  AS rr_28d,
+                       round(d."Blagon", 2)    AS blagon,
+                       round(d."Piraillan", 2) AS piraillan,
+                       EXISTS (
+                           SELECT 1 FROM hc_period h
+                           WHERE p.jour BETWEEN h.start_date AND h.end_date
+                       ) AS en_hc
+                FROM pics p
+                LEFT JOIN nappe_pluie_daily d ON d."date" = p.jour
+                ORDER BY p.ecoli_max DESC
+                """,
+                [date_start, date_end],
+            ).df()
+        finally:
+            con.close()
+        if out.empty:
+            return mo.md("**Aucune analyse sur la période.**")
+        return out
+
+    _contexte_pics()
     return
 
 
