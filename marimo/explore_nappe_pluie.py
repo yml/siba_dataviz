@@ -219,7 +219,7 @@ def _(contam, df, hc, piezo, plt, rr_col, rr_label, seuil):
 @app.cell
 def _(mo):
     mo.md("""
-    ## Agrégats annuels (SQL sur DuckDB)
+    ## Agrégats annuels
 
     La requête tourne directement sur la base, sans passer par pandas.
     """)

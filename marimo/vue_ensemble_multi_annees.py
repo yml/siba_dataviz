@@ -20,8 +20,7 @@ def _():
 
 @app.cell
 def _(DB_PATH, mo):
-    mo.md(
-        f"""
+    mo.md(f"""
     # Vue d'ensemble multi-années — nappe + pluie
 
     Un sous-graphe par année : la profondeur de nappe (axe gauche, inversé) et le
@@ -37,8 +36,7 @@ def _(DB_PATH, mo):
     Base locale : `{DB_PATH}` — tables `nappe_pluie_daily` et `hc_period`.
     La table journalière démarre en 2015 (`DAILY_START`) ; l'épisode HC 2014
     n'apparaît donc pas ici.
-    """
-    )
+    """)
     return
 
 
@@ -149,8 +147,7 @@ def _(daily, hc, mdates, plt):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
+    mo.md("""
     ## Nuages cumul de pluie vs profondeur de nappe
 
     Matrice de nuages de points : une ligne par fenêtre de cumul de pluie
@@ -161,8 +158,7 @@ def _(mo):
 
     Élargir la fenêtre (7 → 56 j) resserre la relation nappe/pluie ; les jours HC
     se regroupent en haut (nappe haute) et à droite (cumuls élevés).
-    """
-    )
+    """)
     return
 
 
