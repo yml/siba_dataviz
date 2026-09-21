@@ -129,3 +129,6 @@ Description détaillée des tables et colonnes : voir [`DATA_DICTIONARY.md`](DAT
 | `notebooks/analyse_nappe_pluie_historique.ipynb` | Nappe + pluie 2010 → aujourd'hui, périodes « hors de contrôle » |
 | `notebooks/analyse_nappe_pluie_2026.ipynb` | Zoom sur l'épisode de 2026 |
 | `marimo/explore_nappe_pluie.py` | Exploration réactive (curseurs, agrégats DuckDB) |
+| `marimo/vue_ensemble_multi_annees.py` | Un sous-graphe par année, nappe + pluie + périodes HC |
+| `marimo/episode_hors_controle.py` | Épisode HC en détail (exportable en WASM) |
+| `marimo/bacterio_carte_pollution.py` | Carte des points chauds *E. coli*, par année |
