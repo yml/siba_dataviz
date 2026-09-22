@@ -101,7 +101,19 @@ def _():
 
 
 @app.cell
-def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
+def _(
+    FIG_W,
+    NAPPE_COLS,
+    ctx_end,
+    ctx_start,
+    df,
+    episode,
+    hc_end,
+    hc_start,
+    margin,
+    mdates,
+    plt,
+):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
         colors = ["#0066cc", "#cc6600"]
@@ -119,8 +131,11 @@ def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
             ax.grid(True, alpha=0.3)
         axes[-1].set_xlabel("Date", fontsize=11)
         axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-        fig.suptitle("Timeline nappe — épisode sélectionné", fontsize=14,
-                     fontweight="bold")
+        fig.suptitle(
+            f"Timeline nappe — période {episode.value} "
+            f"(± {margin.value} mois de contexte)",
+            fontsize=14, fontweight="bold",
+        )
         return fig
 
     _plot()
@@ -128,7 +143,18 @@ def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
 
 
 @app.cell
-def _(FIG_W, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
+def _(
+    FIG_W,
+    ctx_end,
+    ctx_start,
+    df,
+    episode,
+    hc_end,
+    hc_start,
+    margin,
+    mdates,
+    plt,
+):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
         fig, ax = plt.subplots(figsize=(FIG_W, 5), constrained_layout=True)
@@ -141,7 +167,11 @@ def _(FIG_W, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
         ax.axvspan(hc_start, hc_end, alpha=0.15, color="red",
                    label="Hors de contrôle")
         ax.set_ylabel("Précipitation (mm)", fontsize=11)
-        ax.set_title("Timeline pluie — Cap-Ferret", fontsize=13, fontweight="bold")
+        ax.set_title(
+            f"Timeline pluie — Cap-Ferret — période {episode.value} "
+            f"(± {margin.value} mois de contexte)",
+            fontsize=13, fontweight="bold",
+        )
         ax.legend(loc="upper right")
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
         return fig
@@ -151,7 +181,18 @@ def _(FIG_W, ctx_end, ctx_start, df, hc_end, hc_start, mdates, plt):
 
 
 @app.cell
-def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
+def _(
+    FIG_W,
+    NAPPE_COLS,
+    ctx_end,
+    ctx_start,
+    df,
+    episode,
+    hc_end,
+    hc_start,
+    margin,
+    plt,
+):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
         colors = ["#0066cc", "#cc6600"]
@@ -173,7 +214,11 @@ def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
         lines1, labels1 = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
-        ax1.set_title("Superposition nappe + RR7", fontsize=13, fontweight="bold")
+        ax1.set_title(
+            f"Superposition nappe + RR7 — période {episode.value} "
+            f"(± {margin.value} mois de contexte)",
+            fontsize=13, fontweight="bold",
+        )
         return fig
 
     _plot()
@@ -181,7 +226,74 @@ def _(FIG_W, NAPPE_COLS, ctx_end, ctx_start, df, hc_end, hc_start, plt):
 
 
 @app.cell
-def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, plt):
+def _(
+    FIG_W,
+    NAPPE_COLS,
+    ctx_end,
+    ctx_start,
+    df,
+    episode,
+    hc_end,
+    hc_start,
+    margin,
+    mo,
+    plt,
+):
+    def _plot():
+        # Même nuage que le suivant, mais borné à la fenêtre du sélecteur :
+        # l'épisode et ses seules marges de contexte. Sur tout l'historique
+        # l'épisode se réduit à quelques points noyés dans onze ans de
+        # mesures ; ici on compare les jours HC aux semaines qui les
+        # encadrent, ce qui est la comparaison utile.
+        d = df.loc[ctx_start:ctx_end].dropna(subset=["RR7"]).copy()
+        if d.empty:
+            return mo.md("**Aucune donnée sur la fenêtre sélectionnée.**")
+
+        avant = d[d.index < hc_start]
+        pendant = d[(d.index >= hc_start) & (d.index <= hc_end)]
+        apres = d[d.index > hc_end]
+
+        fig, axes = plt.subplots(1, len(NAPPE_COLS), figsize=(FIG_W, 5),
+                                 constrained_layout=True)
+        for ax, col in zip(axes, NAPPE_COLS):
+            # Bleu = hors épisode, rouge = pendant : même code couleur que
+            # le reste du notebook. Avant et après se distinguent par la
+            # forme, pour ne pas introduire une troisième teinte.
+            for part, marker, label in (
+                (avant, "o", "Avant"),
+                (apres, "^", "Après"),
+            ):
+                s = part.dropna(subset=[col])
+                if len(s):
+                    ax.scatter(s["RR7"], s[col], c="steelblue", alpha=0.5, s=34,
+                               marker=marker, edgecolors="none",
+                               label=f"{label} ({len(s)} j)")
+            s = pendant.dropna(subset=[col])
+            if len(s):
+                ax.scatter(s["RR7"], s[col], c="red", alpha=0.85, s=60,
+                           edgecolors="darkred", zorder=5,
+                           label=f"Hors de contrôle ({len(s)} j)")
+            ax.axvline(70, color="orange", linestyle="--", linewidth=1,
+                       alpha=0.7, zorder=0)
+            ax.set_xlabel("Cumul 7 jours RR7 (mm)", fontsize=11)
+            ax.set_ylabel("Profondeur nappe (m)", fontsize=11)
+            ax.set_title(col, fontsize=12, fontweight="bold")
+            ax.invert_yaxis()
+            ax.grid(True, alpha=0.25)
+            ax.legend(fontsize=9)
+        fig.suptitle(
+            f"RR7 vs profondeur de nappe — période {episode.value}, "
+            f"fenêtre ± {margin.value} mois uniquement\n",
+            fontsize=13, fontweight="bold",
+        )
+        return fig
+
+    _plot()
+    return
+
+
+@app.cell
+def _(FIG_W, NAPPE_COLS, df, episode, hc_end, hc_start, plt):
     def _plot():
         dd = df.dropna(subset=["RR7"]).copy()
         dd["sel_hc"] = (dd.index >= hc_start) & (dd.index <= hc_end)
@@ -201,8 +313,11 @@ def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, plt):
             ax.invert_yaxis()
             ax.grid(True, alpha=0.25)
             ax.legend()
-        fig.suptitle("RR7 vs profondeur de nappe (tout l'historique, épisode en rouge)",
-                     fontsize=14, fontweight="bold")
+        fig.suptitle(
+            f"RR7 vs profondeur de nappe — tout l'historique, "
+            f"période {episode.value} en rouge",
+            fontsize=14, fontweight="bold",
+        )
         return fig
 
     _plot()
@@ -210,7 +325,7 @@ def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, plt):
 
 
 @app.cell
-def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, np, plt):
+def _(FIG_W, NAPPE_COLS, df, episode, hc_end, hc_start, np, plt):
     def _plot():
         a = df.copy()
         a["periode"] = np.where(
@@ -238,8 +353,10 @@ def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, np, plt):
             ax.set_title(var, fontsize=12, fontweight="bold")
             if var in NAPPE_COLS:
                 ax.invert_yaxis()
-        fig.suptitle("Épisode « hors de contrôle » vs reste de l'historique",
-                     fontsize=14, fontweight="bold")
+        fig.suptitle(
+            f"Période {episode.value} vs reste de l'historique",
+            fontsize=14, fontweight="bold",
+        )
         return fig
 
     _plot()
@@ -247,7 +364,7 @@ def _(FIG_W, NAPPE_COLS, df, hc_end, hc_start, np, plt):
 
 
 @app.cell
-def _(NAPPE_COLS, df, hc_end, hc_start, mo, np, stats):
+def _(NAPPE_COLS, df, episode, hc_end, hc_start, mo, np, stats):
     def _table():
         a = df.copy()
         a["periode"] = np.where(
@@ -270,7 +387,8 @@ def _(NAPPE_COLS, df, hc_end, hc_start, mo, np, stats):
             "|---|---|---|---|---|---|\n"
         )
         return mo.md(
-            "### Test de Mann-Whitney U (épisode vs reste)\n\n"
+            f"### Test de Mann-Whitney U — période {episode.value} "
+            "vs reste de l'historique\n\n"
             + head + "\n".join(rows)
             + "\n\np < 0.05 ⇒ distributions significativement différentes."
         )
