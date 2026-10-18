@@ -121,6 +121,8 @@ dernière date disponible. Reconstruite à chaque chargement.
 | `date` | DATE | jour |
 | `Blagon` | DOUBLE | profondeur nappe Blagon (Lanton), rééchantillonnée en journalier + interpolation temporelle (trous ≤ 3 j) |
 | `Piraillan` | DOUBLE | profondeur nappe Piraillan (Lège-Cap-Ferret), même traitement |
+| `Biganos` | DOUBLE | profondeur nappe Canauley (Biganos), même masse d'eau que Blagon, même traitement |
+| `La_Teste` | DOUBLE | profondeur nappe Villemarie (La Teste-de-Buch), rive sud (hors bassin de la STEP de Biganos), même traitement |
 | `rr` | DOUBLE | précipitation quotidienne à Cap-Ferret (mm) |
 | `rr_7d` | DOUBLE | cumul glissant de pluie sur 7 jours (NULL tant que la fenêtre n'est pas pleine) |
 | `rr_14d` | DOUBLE | cumul glissant sur 14 jours |
@@ -208,7 +210,7 @@ augmentée de deux drapeaux booléens par jour, pour l'analyse de corrélation.
 
 | colonne | type | description |
 |---|---|---|
-| *(colonnes de `nappe_pluie_daily`)* | | `date`, `Blagon`, `Piraillan`, `rr`, `rr_7d`, `rr_14d`, `rr_28d`, `rr_56d` |
+| *(colonnes de `nappe_pluie_daily`)* | | `date`, `Blagon`, `Piraillan`, `Biganos`, `La_Teste`, `rr`, `rr_7d`, `rr_14d`, `rr_28d`, `rr_56d` |
 | `in_hc` | BOOLEAN | le jour tombe dans au moins une période `hc_period` |
 | `in_interdiction` | BOOLEAN | le jour tombe dans au moins une période `interdiction_period` |
 
@@ -226,6 +228,9 @@ Données récupérées directement depuis les portails open data (voir
 - Stations (fiches ADES) :
   - Blagon (Lanton) `08262X0023/F` : <https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F>
   - Piraillan (Lège-Cap-Ferret) `08257X0086/F` : <https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F>
+  - Canauley (Biganos) `08266X0003/F` : <https://ades.eaufrance.fr/Fiche/PointEau?code=08266X0003/F>
+  - Villemarie (La Teste-de-Buch) `08494X0126/PZ1` : <https://ades.eaufrance.fr/Fiche/PointEau?code=08494X0126/PZ1>
+  - Les quatre captent des nappes libres plio-quaternaires (sables), au contact des réseaux enterrés.
 
 ### Pluie — Météo-France (données climatologiques quotidiennes, Gironde)
 

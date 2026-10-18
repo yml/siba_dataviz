@@ -27,6 +27,21 @@ PIEZOMETERS = [
         "col": "Piraillan",
         "station_id": "nappe_08257X0086_F",
     },
+    {
+        # Canauley DFCI, ouvrage de 7,65 m, même masse d'eau que Blagon.
+        "code_bss": "08266X0003/F",
+        "name": "Canauley (Biganos)",
+        "col": "Biganos",
+        "station_id": "nappe_08266X0003_F",
+    },
+    {
+        # Villemarie 126, ouvrage de 20 m, rive sud : hors bassin de collecte
+        # de la STEP de Biganos.
+        "code_bss": "08494X0126/PZ1",
+        "name": "Villemarie (La Teste-de-Buch)",
+        "col": "La_Teste",
+        "station_id": "nappe_08494X0126_PZ1",
+    },
 ]
 
 #: Stations météo dont on veut une vue curée pratique.

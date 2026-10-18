@@ -29,22 +29,45 @@ def _(DB_PATH, mo):
 
     **Provenance des données** — nappe : [Hub'eau piézométrie](https://hubeau.eaufrance.fr/page/api-piezometrie)
     (stations ADES [Blagon 08262X0023/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F),
-    [Piraillan 08257X0086/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F)) ;
+    [Piraillan 08257X0086/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F),
+    [Biganos 08266X0003/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08266X0003/F),
+    [La Teste 08494X0126/PZ1](https://ades.eaufrance.fr/Fiche/PointEau?code=08494X0126/PZ1)) ;
     pluie : [Météo-France données ouvertes](https://meteo.data.gouv.fr/) (poste
     Cap-Ferret 33236002). Détail des champs : `DATA_DICTIONARY.md`.
 
     Base locale : `{DB_PATH}` — tables `nappe_pluie_daily` et `hc_period`.
     La table journalière démarre en 2015 (`DAILY_START`) ; l'épisode HC 2014
     n'apparaît donc pas ici.
+
+    Le sélecteur ci-dessous choisit les piézomètres affichés dans les deux
+    graphiques ; chaque piézomètre garde sa couleur.
     """)
     return
+
+
+@app.cell
+def _(mo):
+    # Couleur fixe par piézomètre : elle ne change pas avec la sélection.
+    COULEURS_NAPPE = {
+        "Blagon": "#0066cc",
+        "Piraillan": "#cc6600",
+        "Biganos": "#8a3ffc",
+        "La_Teste": "#1f9e89",
+    }
+    nappes_choisies = mo.ui.multiselect(
+        options=list(COULEURS_NAPPE),
+        value=list(COULEURS_NAPPE),
+        label="Piézomètres",
+    )
+    nappes_choisies
+    return COULEURS_NAPPE, nappes_choisies
 
 
 @app.cell
 def _(DB_PATH, duckdb, pd):
     con = duckdb.connect(str(DB_PATH), read_only=True)
     daily = con.execute(
-        'SELECT "date", "Blagon", "Piraillan", rr_7d '
+        'SELECT "date", "Blagon", "Piraillan", "Biganos", "La_Teste", rr_7d '
         'FROM nappe_pluie_daily ORDER BY "date"'
     ).df()
     hc = con.execute(
@@ -60,10 +83,10 @@ def _(DB_PATH, duckdb, pd):
 
 
 @app.cell
-def _(daily, hc, mdates, plt):
-    # Séries de nappe (profondeur) et leurs couleurs — ordre fixe.
-    nappe_cols = ["Blagon", "Piraillan"]
-    colors_nappe = ["#0066cc", "#cc6600"]
+def _(COULEURS_NAPPE, daily, hc, mdates, mo, nappes_choisies, plt):
+    mo.stop(not nappes_choisies.value, mo.md("Choisir au moins un piézomètre."))
+    # Ordre fixe (celui du sélecteur), quel que soit l'ordre des clics.
+    nappe_cols = [c for c in COULEURS_NAPPE if c in nappes_choisies.value]
     seuil_rr7 = 70  # seuil SIBA (mm / 7 j)
 
     years_list = sorted(set(daily.index.year))
@@ -79,13 +102,13 @@ def _(daily, hc, mdates, plt):
         df_year = daily.loc[daily.index.year == year]
 
         # Nappe (axe gauche, inversé : nappe haute = peu profonde = en haut)
-        for j, col in enumerate(nappe_cols):
+        for col in nappe_cols:
             data = df_year[col].dropna()
             if len(data) > 0:
                 ax.plot(
                     data.index,
                     data.values,
-                    color=colors_nappe[j % len(colors_nappe)],
+                    color=COULEURS_NAPPE[col],
                     linewidth=1.2,
                     label=col,
                 )
@@ -151,7 +174,7 @@ def _(mo):
     ## Nuages cumul de pluie vs profondeur de nappe
 
     Matrice de nuages de points : une ligne par fenêtre de cumul de pluie
-    (RR7 / RR14 / RR28 / RR56), une colonne par piézomètre. Chaque point est un
+    (RR7 / RR14 / RR28 / RR56), une colonne par piézomètre choisi. Chaque point est un
     jour ; abscisse = cumul de pluie, ordonnée = profondeur de nappe (axe inversé,
     nappe haute en haut). Les points **rouges** sont les jours « hors de contrôle »
     (`in_hc` de `v_nappe_pluie_events`, toutes périodes confondues).
@@ -163,20 +186,24 @@ def _(mo):
 
 
 @app.cell
-def _(DB_PATH, duckdb, plt):
+def _(COULEURS_NAPPE, DB_PATH, duckdb, mo, nappes_choisies, plt):
+    mo.stop(not nappes_choisies.value, mo.md("Choisir au moins un piézomètre."))
+
     def _scatter():
         con = duckdb.connect(str(DB_PATH), read_only=True)
         ev = con.execute(
-            'SELECT "Blagon", "Piraillan", rr_7d, rr_14d, rr_28d, rr_56d, in_hc '
+            'SELECT "Blagon", "Piraillan", "Biganos", "La_Teste", rr_7d, rr_14d, rr_28d, rr_56d, in_hc '
             "FROM v_nappe_pluie_events"
         ).df()
         con.close()
 
         windows = [("rr_7d", "RR7"), ("rr_14d", "RR14"),
                    ("rr_28d", "RR28"), ("rr_56d", "RR56")]
-        piezos = ["Blagon", "Piraillan"]
+        piezos = [c for c in COULEURS_NAPPE if c in nappes_choisies.value]
 
-        fig, axes = plt.subplots(len(windows), len(piezos), figsize=(13, 18))
+        # squeeze=False : axes reste une grille 2D même avec un seul piézomètre.
+        fig, axes = plt.subplots(len(windows), len(piezos),
+                                 figsize=(max(5 * len(piezos), 9), 18), squeeze=False)
         for r, (wcol, wlabel) in enumerate(windows):
             for c, pz in enumerate(piezos):
                 ax = axes[r][c]
@@ -199,7 +226,7 @@ def _(DB_PATH, duckdb, plt):
                 if r == 0 and c == len(piezos) - 1:
                     ax.legend(fontsize=9)
         fig.suptitle(
-            "Cumuls de pluie (7/14/28/56 j) vs profondeur de nappe — "
+            "Cumuls de pluie (7/14/28/56 j) vs profondeur de nappe\n"
             "rouge = réseau hors de contrôle",
             fontsize=14, fontweight="bold", y=1.005,
         )

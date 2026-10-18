@@ -378,6 +378,8 @@ def _(DB_PATH, date_end, date_start, duckdb, mo, piezo):
                        round(d.rr_28d, 1)  AS rr_28d,
                        round(d."Blagon", 2)    AS blagon,
                        round(d."Piraillan", 2) AS piraillan,
+                       round(d."Biganos", 2)   AS biganos,
+                       round(d."La_Teste", 2)  AS la_teste,
                        EXISTS (
                            SELECT 1 FROM hc_period h
                            WHERE p.jour BETWEEN h.start_date AND h.end_date

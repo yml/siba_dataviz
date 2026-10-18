@@ -72,9 +72,10 @@ def test_format_summary_reports_counts_and_ranges(tmp_path, monkeypatch, meteo_c
     con = schema.connect(dbp)
     s = loader.format_summary(con, "update")
     con.close()
-    # mode + all three table names + their counts (4 nappe rows, 3 meteo rows)
+    # mode + all three table names + their counts (one fake nappe row per
+    # piezometer and year, update = 2 years; 3 meteo rows)
     assert "update" in s
-    assert "nappe_mesure=4" in s
+    assert f"nappe_mesure={2 * len(config.PIEZOMETERS)}" in s
     assert "meteo_jour=3" in s
     assert "nappe_pluie_daily=" in s
     # ingest_log rows from this run, with a date range arrow

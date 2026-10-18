@@ -21,9 +21,12 @@ def test_db_path_under_data_dir():
 
 
 def test_piezometers_have_required_keys():
-    assert len(config.PIEZOMETERS) == 2
+    assert len(config.PIEZOMETERS) == 4
     for p in config.PIEZOMETERS:
         assert set(p) >= {"code_bss", "name", "col", "station_id"}
+    # Blagon reste la référence (premier) ; noms de colonne uniques.
+    cols = [p["col"] for p in config.PIEZOMETERS]
+    assert cols == ["Blagon", "Piraillan", "Biganos", "La_Teste"]
 
 
 def test_cap_ferret_is_a_station_of_interest():

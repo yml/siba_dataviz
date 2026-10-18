@@ -62,7 +62,7 @@ OLD_LOAD = '''@app.cell
 def _(DB_PATH, duckdb, pd):
     con = duckdb.connect(str(DB_PATH), read_only=True)
     df = con.execute(
-        'SELECT "date", "Blagon", "Piraillan", rr AS "RR", rr_7d AS "RR7", in_hc '
+        'SELECT "date", "Blagon", "Piraillan", "Biganos", "La_Teste", rr AS "RR", rr_7d AS "RR7", in_hc '
         "FROM v_nappe_pluie_events ORDER BY \\"date\\""
     ).df()
     episodes = con.execute(
@@ -75,7 +75,7 @@ def _(DB_PATH, duckdb, pd):
     episodes["start_date"] = pd.to_datetime(episodes["start_date"])
     episodes["end_date"] = pd.to_datetime(episodes["end_date"])
 
-    NAPPE_COLS = ["Blagon", "Piraillan"]
+    NAPPE_COLS = ["Blagon", "Piraillan", "Biganos", "La_Teste"]
     return NAPPE_COLS, df, episodes'''
 
 NEW_LOAD_TMPL = '''@app.cell
@@ -97,7 +97,7 @@ def _(base64, gzip, io, pd):
     episodes["start_date"] = pd.to_datetime(episodes["start_date"])
     episodes["end_date"] = pd.to_datetime(episodes["end_date"])
 
-    NAPPE_COLS = ["Blagon", "Piraillan"]
+    NAPPE_COLS = ["Blagon", "Piraillan", "Biganos", "La_Teste"]
     return NAPPE_COLS, df, episodes'''
 
 OLD_TITLE = '''    Version réactive inspirée de `notebooks/analyse_nappe_pluie_2026.ipynb`, lisant
@@ -119,7 +119,7 @@ def fetch_embedded() -> tuple[str, str]:
     con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         daily = con.execute(
-            'SELECT "date", "Blagon", "Piraillan", rr AS "RR", rr_7d AS "RR7", in_hc '
+            'SELECT "date", "Blagon", "Piraillan", "Biganos", "La_Teste", rr AS "RR", rr_7d AS "RR7", in_hc '
             'FROM v_nappe_pluie_events ORDER BY "date"'
         ).df()
         episodes = con.execute(

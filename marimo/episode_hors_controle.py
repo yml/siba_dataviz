@@ -41,7 +41,9 @@ def _(mo):
 
     **Sources** — nappe : [Hub'eau piézométrie](https://hubeau.eaufrance.fr/page/api-piezometrie)
     (stations ADES [Blagon 08262X0023/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F),
-    [Piraillan 08257X0086/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F)) ;
+    [Piraillan 08257X0086/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F),
+    [Biganos 08266X0003/F](https://ades.eaufrance.fr/Fiche/PointEau?code=08266X0003/F),
+    [La Teste 08494X0126/PZ1](https://ades.eaufrance.fr/Fiche/PointEau?code=08494X0126/PZ1)) ;
     pluie : [Météo-France données ouvertes](https://meteo.data.gouv.fr/) (poste
     Cap-Ferret 33236002).
     """)
@@ -52,7 +54,7 @@ def _(mo):
 def _(DB_PATH, duckdb, pd):
     con = duckdb.connect(str(DB_PATH), read_only=True)
     df = con.execute(
-        'SELECT "date", "Blagon", "Piraillan", rr AS "RR", rr_7d AS "RR7", in_hc '
+        'SELECT "date", "Blagon", "Piraillan", "Biganos", "La_Teste", rr AS "RR", rr_7d AS "RR7", in_hc '
         "FROM v_nappe_pluie_events ORDER BY \"date\""
     ).df()
     episodes = con.execute(
@@ -65,7 +67,7 @@ def _(DB_PATH, duckdb, pd):
     episodes["start_date"] = pd.to_datetime(episodes["start_date"])
     episodes["end_date"] = pd.to_datetime(episodes["end_date"])
 
-    NAPPE_COLS = ["Blagon", "Piraillan"]
+    NAPPE_COLS = ["Blagon", "Piraillan", "Biganos", "La_Teste"]
     return NAPPE_COLS, df, episodes
 
 
@@ -116,9 +118,9 @@ def _(
 ):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
-        colors = ["#0066cc", "#cc6600"]
-        fig, axes = plt.subplots(len(NAPPE_COLS), 1, figsize=(FIG_W, 7), sharex=True,
-                                 constrained_layout=True)
+        colors = ["#0066cc", "#cc6600", "#8a3ffc", "#1f9e89"]
+        fig, axes = plt.subplots(len(NAPPE_COLS), 1, figsize=(FIG_W, 2.6 * len(NAPPE_COLS)),
+                                 sharex=True, constrained_layout=True)
         for ax, (col, color) in zip(axes, zip(NAPPE_COLS, colors)):
             s = d[col].dropna()
             ax.plot(s.index, s.values, color=color, linewidth=1.5, label=col)
@@ -195,7 +197,7 @@ def _(
 ):
     def _plot():
         d = df.loc[ctx_start:ctx_end]
-        colors = ["#0066cc", "#cc6600"]
+        colors = ["#0066cc", "#cc6600", "#8a3ffc", "#1f9e89"]
         fig, ax1 = plt.subplots(figsize=(FIG_W, 6), constrained_layout=True)
         for col, color in zip(NAPPE_COLS, colors):
             s = d[col].dropna()
@@ -398,27 +400,41 @@ def _(NAPPE_COLS, df, episode, hc_end, hc_start, mo, np, stats):
 
 
 @app.cell
-def _(mo):
-    mo.md("""
-    ## Risque joint : nappe (Blagon) × pluie (RR7)
+def _(NAPPE_COLS, mo):
+    nappe_risque = mo.ui.dropdown(
+        options=NAPPE_COLS, value=NAPPE_COLS[0], label="Piézomètre"
+    )
+    mo.vstack([
+        mo.md("""
+    ## Risque joint : nappe × pluie (RR7)
 
     Part de jours « hors de contrôle » (`in_hc`) sur **tout l'historique** — tous
-    les épisodes confondus, **indépendamment du sélecteur ci-dessus** — selon la
-    profondeur de nappe Blagon **et** le cumul de pluie 7 jours, en grille 2D.
-    Nappe haute en haut, pluie croissante vers la droite ; les cellules de moins de
-    5 jours sont masquées. Le risque se concentre en **haut à droite** (nappe haute
-    + pluie élevée) : une nappe haute est nécessaire, la pluie amplifie.
-    """)
-    return
+    les épisodes confondus, **indépendamment du sélecteur d'épisode** — selon la
+    profondeur de la nappe choisie ci-dessous **et** le cumul de pluie 7 jours,
+    en grille 2D. Nappe haute en haut, pluie croissante vers la droite ; les
+    cellules de moins de 5 jours sont masquées. Avec Blagon, le risque se
+    concentre en **haut à droite** (nappe haute + pluie élevée) : une nappe
+    haute est nécessaire, la pluie amplifie. Les tranches de profondeur (25 cm)
+    suivent la plage de chaque piézomètre.
+    """),
+        nappe_risque,
+    ])
+    return (nappe_risque,)
 
 
 @app.cell
-def _(FIG_W, df, np, pd, plt):
+def _(FIG_W, df, nappe_risque, np, pd, plt):
     def _heat():
-        d = df.dropna(subset=["Blagon", "RR7"]).copy()
-        depth_edges = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0]
+        col = nappe_risque.value
+        d = df.dropna(subset=[col, "RR7"]).copy()
+        # Tranches de 25 cm calées sur la plage du piézomètre choisi.
+        depth_edges = np.arange(
+            np.floor(d[col].min() * 4) / 4,
+            np.ceil(d[col].max() * 4) / 4 + 0.001,
+            0.25,
+        ).round(2)
         rr7_edges = [0, 20, 40, 60, 80, 100, 120, 160]
-        d["dbin"] = pd.cut(d["Blagon"], depth_edges)
+        d["dbin"] = pd.cut(d[col], depth_edges, include_lowest=True)
         d["rbin"] = pd.cut(d["RR7"], rr7_edges)
         g = d.groupby(["dbin", "rbin"], observed=False)["in_hc"]
         prob = (g.mean() * 100).unstack().sort_index(ascending=True)
@@ -445,11 +461,11 @@ def _(FIG_W, df, np, pd, plt):
         cbar = fig.colorbar(im, ax=ax)
         cbar.set_label("P(hors de contrôle) %")
         ax.set_xlabel("Cumul pluie 7 jours RR7 (mm)", fontsize=11)
-        ax.set_ylabel("Profondeur nappe Blagon (m) — haut = nappe haute", fontsize=11)
+        ax.set_ylabel(f"Profondeur nappe {col} (m) — haut = nappe haute", fontsize=11)
         ax.set_title(
             "Risque « hors de contrôle » — tous épisodes, tout l'historique "
             "(indépendant du sélecteur)\n"
-            "nappe (Blagon) × pluie (RR7) ; cellules < 5 jours masquées ; "
+            f"nappe ({col}) × pluie (RR7) ; cellules < 5 jours masquées ; "
             "% = part de jours HC",
             fontsize=12, fontweight="bold",
         )

@@ -16,7 +16,11 @@ Tout est récupéré directement depuis les portails open data (voir
 - Stations (fiches ADES) : Blagon (Lanton) `08262X0023/F`
   (<https://ades.eaufrance.fr/Fiche/PointEau?code=08262X0023/F>), Piraillan
   (Lège-Cap-Ferret) `08257X0086/F`
-  (<https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F>)
+  (<https://ades.eaufrance.fr/Fiche/PointEau?code=08257X0086/F>), Canauley
+  (Biganos) `08266X0003/F`
+  (<https://ades.eaufrance.fr/Fiche/PointEau?code=08266X0003/F>), Villemarie
+  (La Teste-de-Buch) `08494X0126/PZ1`
+  (<https://ades.eaufrance.fr/Fiche/PointEau?code=08494X0126/PZ1>)
 
 **Pluie — Météo-France (données climatologiques quotidiennes, Gironde)**
 
