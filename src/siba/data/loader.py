@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import tempfile
 import time
 import tomllib
 from pathlib import Path
@@ -11,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import config, schema, sources
+from . import config, schema, sources, versions
 
 
 def _as_date(value):
@@ -30,12 +29,33 @@ def _span(lo, hi, other_lo, other_hi):
     return lo, hi
 
 
-def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year):
+def _nappe_path(code_bss, year) -> Path:
+    """Fichier JSON local d'un piézomètre pour une année."""
+    return config.SOURCES_DIR / "hubeau" / code_bss.replace("/", "_") / f"{year}.json"
+
+
+def _meteo_path(key) -> Path:
+    """Fichier .csv.gz local d'une clé de ``METEO_URLS``."""
+    return config.SOURCES_DIR / "meteofrance" / f"{key}.csv.gz"
+
+
+def _load_nappe(
+    con, years, *, refresh, download=sources.download_nappe_year, read=sources.read_nappe_year
+):
+    """Charge les JSON Hub'eau locaux ; télécharge ceux absents (ou tous si *refresh*)."""
     total = 0
     dmin = dmax = None
     for p in config.PIEZOMETERS:
         for year in years:
-            df = fetch(p["code_bss"], year)
+            path = _nappe_path(p["code_bss"], year)
+            # Un [] en cache est retéléchargé : il peut venir d'une panne amont
+            # (Hub'eau a déjà répondu HTTP 200 sans données). Coût : une requête
+            # par année réellement vide à chaque rebuild.
+            if refresh or not path.exists() or path.read_text(encoding="utf-8").strip() == "[]":
+                download(p["code_bss"], year, path)
+                # Espace les requêtes pour éviter le throttling Hub'eau en rebuild.
+                time.sleep(config.NAPPE_REQUEST_DELAY)
+            df = read(path)
             n = schema.upsert_dataframe(
                 con, "nappe_mesure", df, keys=["code_bss", "date_mesure"]
             )
@@ -44,8 +64,6 @@ def _load_nappe(con, years, *, fetch=sources.fetch_nappe_year):
             if not df.empty:
                 dates = pd.to_datetime(df["date_mesure"])
                 dmin, dmax = _span(dmin, dmax, _as_date(dates.min()), _as_date(dates.max()))
-            # Espace les requêtes pour éviter le throttling Hub'eau en rebuild.
-            time.sleep(config.NAPPE_REQUEST_DELAY)
     return total, dmin, dmax
 
 
@@ -53,13 +71,14 @@ def _ingest_meteo_csv(con, path) -> int:
     """Ingère un fichier Météo-France via le lecteur CSV de DuckDB (pas pandas).
 
     Le fichier est lu en streaming dans une table de staging (toutes colonnes
-    en VARCHAR), cadré sur ``METEO_COLUMNS`` (+ ``date`` dérivée d'AAAAMMJJ),
-    dédupliqué keep-last sur ``(NUM_POSTE, date)``, puis upserté. Renvoie le
-    nombre de lignes stagées.
+    en VARCHAR), filtré sur les postes de ``METEO_STATIONS``, cadré sur
+    ``METEO_COLUMNS`` (+ ``date`` dérivée d'AAAAMMJJ), dédupliqué keep-last
+    sur ``(NUM_POSTE, date)``, puis upserté. Renvoie le nombre de lignes stagées.
     """
     path = str(path)
     reader = "read_csv(?, delim=';', header=true, all_varchar=true)"
     present = [d[0] for d in con.execute(f"SELECT * FROM {reader} LIMIT 0", [path]).description]
+    stations = ", ".join("?" for _ in config.METEO_STATIONS)
     proj = ", ".join(
         f'"{c}"' if c in present else f'CAST(NULL AS VARCHAR) AS "{c}"'
         for c in config.METEO_COLUMNS
@@ -72,12 +91,13 @@ def _ingest_meteo_csv(con, path) -> int:
                    try_strptime("AAAAMMJJ", '%Y%m%d')::DATE AS "date",
                    row_number() OVER () AS _rn
             FROM {reader}
+            WHERE "NUM_POSTE" IN ({stations})
         )
         SELECT * EXCLUDE (_rn) FROM raw
         WHERE "date" IS NOT NULL
         QUALIFY row_number() OVER (PARTITION BY "NUM_POSTE", "date" ORDER BY _rn DESC) = 1
         """,
-        [path],
+        [path, *config.METEO_STATIONS],
     )
     n, dmin, dmax = con.execute(
         'SELECT COUNT(*), MIN("date"), MAX("date") FROM _meteo_stage'
@@ -93,17 +113,18 @@ def _ingest_meteo_csv(con, path) -> int:
     return n, dmin, dmax
 
 
-def _load_meteo(con, url_keys, *, download=sources.download_meteo_file):
+def _load_meteo(con, url_keys, *, refresh, download=sources.download_meteo_file):
+    """Ingère les .csv.gz locaux ; télécharge ceux absents (ou tous si *refresh*)."""
     total = 0
     dmin = dmax = None
     for key in url_keys:
-        url = config.METEO_URLS[key]
-        with tempfile.TemporaryDirectory() as tmp:
-            csv_path = download(url, tmp)
-            n, lo, hi = _ingest_meteo_csv(con, csv_path)
-            total += n
-            print(f"Météo-France  fichier {key} … {n} lignes")
-            dmin, dmax = _span(dmin, dmax, lo, hi)
+        path = _meteo_path(key)
+        if refresh or not path.exists():
+            download(config.METEO_URLS[key], path)
+        n, lo, hi = _ingest_meteo_csv(con, path)
+        total += n
+        print(f"Météo-France  fichier {key} … {n} lignes")
+        dmin, dmax = _span(dmin, dmax, lo, hi)
     return total, dmin, dmax
 
 
@@ -325,12 +346,12 @@ def _log(con, source, scope, mode, rows, date_min=None, date_max=None) -> None:
 
 def update(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
-    con = schema.connect(db_path)
-    try:
+    versions.migrate(db_path)
+    with versions.new_version(db_path, "load") as con:
         print(f"siba.data update → {db_path}")
-        # Atomic: schema changes, loads, the derived rebuild and the log rows run
-        # in one transaction so a mid-run failure (e.g. meteo after nappe) rolls
-        # back and never leaves raw and derived data inconsistent.
+        # La version se construit dans un .tmp (copie de la courante) : un échec
+        # en cours de route (ex. météo après nappe) supprime le .tmp et laisse
+        # le lien sur la version courante, intacte.
         con.execute("BEGIN TRANSACTION")
         try:
             schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
@@ -341,8 +362,8 @@ def update(db_path=None) -> None:
             # Prev + current year: a January run still picks up late-December points
             # and prior-year requalifications; the upsert absorbs the overlap.
             years = [year - 1, year]
-            n_nappe, nmin, nmax = _load_nappe(con, years)
-            n_meteo, mmin, mmax = _load_meteo(con, ["latest"])
+            n_nappe, nmin, nmax = _load_nappe(con, years, refresh=True)
+            n_meteo, mmin, mmax = _load_meteo(con, ["latest"], refresh=True)
             _enrich_stations(con)
             print("Construction de nappe_pluie_daily …")
             build_nappe_pluie_daily(con)
@@ -356,18 +377,18 @@ def update(db_path=None) -> None:
             con.execute("ROLLBACK")
             raise
         print(format_summary(con, "update"))
-    finally:
-        con.close()
 
 
-def rebuild(db_path=None) -> None:
+def rebuild(db_path=None, *, refresh=False) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
-    con = schema.connect(db_path)
-    try:
+    versions.migrate(db_path)
+    # Version vide, pas une copie de la courante : drop_all la viderait aussitôt
+    # et le fichier garderait les blocs libérés.
+    with versions.new_version(db_path, "load", copy=False) as con:
         print(f"siba.data rebuild → {db_path}")
-        # Atomic: drop/create/load run in one transaction so a mid-run failure
-        # (e.g. a Hub'eau timeout) rolls back and preserves the existing data
-        # instead of leaving an emptied DB. DuckDB rolls back DDL and DML together.
+        # La version se construit dans un .tmp : un échec en cours de route
+        # (ex. timeout Hub'eau) supprime le .tmp et laisse le lien sur la
+        # version courante, intacte.
         con.execute("BEGIN TRANSACTION")
         try:
             schema.drop_all(con)
@@ -376,22 +397,23 @@ def rebuild(db_path=None) -> None:
             _load_events(con)
             n_enki, e_lo, e_hi = _load_enki(con)
             years = list(range(config.NAPPE_START_YEAR, dt.date.today().year + 1))
-            n_nappe, nmin, nmax = _load_nappe(con, years)
-            n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS))
+            n_nappe, nmin, nmax = _load_nappe(con, years, refresh=refresh)
+            n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS), refresh=refresh)
 
-            # Garde-fou : `rebuild` efface avant de recharger. Si une source ne
+            # Garde-fou : `rebuild` repart d'une base vide. Si une source ne
             # renvoie rien (panne amont — Hub'eau a déjà répondu HTTP 200 avec
             # zéro ligne pendant une indisponibilité), on annule au lieu de
-            # committer une table vide : le ROLLBACK ci-dessous restaure les
-            # données précédentes. Zéro ligne sur toutes les années et tous les
-            # points n'est jamais un cas réel.
+            # publier une version vide : le .tmp est supprimé et le lien reste
+            # sur la version précédente. Zéro ligne sur toutes les années et
+            # tous les points n'est jamais un cas réel.
             if n_nappe == 0:
                 raise RuntimeError(
                     f"Hub'eau n'a renvoyé aucune mesure de nappe sur "
                     f"{years[0]}-{years[-1]} ({len(config.PIEZOMETERS)} piézomètres) : "
                     "source probablement indisponible. Rebuild annulé, les données "
-                    "existantes sont conservées. Réessayer plus tard, ou utiliser "
-                    "`update` qui n'efface rien."
+                    "existantes sont conservées. Relancer `make rebuild` plus tard "
+                    "(les années vides en cache sont retéléchargées), ou `make "
+                    "refresh` pour tout retélécharger."
                 )
             if n_meteo == 0:
                 raise RuntimeError(
@@ -412,14 +434,51 @@ def rebuild(db_path=None) -> None:
         except Exception:
             con.execute("ROLLBACK")
             raise
-        # Rafraîchit le descriptif officiel des champs météo (best-effort : un
-        # échec réseau ne casse pas le rebuild, la base est déjà committée).
-        try:
-            descriptor = config.DATA_DIR / "Q_descriptif_champs_RR-T-Vent.csv"
-            sources.download_meteo_descriptor(descriptor)
-            print(f"Descriptif Météo-France mis en cache : {descriptor}")
-        except Exception as exc:
-            print(f"Avertissement : descriptif Météo-France non mis à jour ({exc})")
         print(format_summary(con, "rebuild"))
-    finally:
-        con.close()
+    # Rafraîchit le descriptif officiel des champs météo (best-effort : un
+    # échec réseau ne casse pas le rebuild, la nouvelle version est déjà en place).
+    try:
+        descriptor = config.DATA_DIR / "Q_descriptif_champs_RR-T-Vent.csv"
+        sources.download_meteo_descriptor(descriptor)
+        print(f"Descriptif Météo-France mis en cache : {descriptor}")
+    except Exception as exc:
+        print(f"Avertissement : descriptif Météo-France non mis à jour ({exc})")
+
+
+def list_versions(db_path=None) -> None:
+    """Affiche les versions de la base, la courante marquée ``*``."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    rows = versions.list_versions(db_path)
+    if not rows:
+        print("Aucune version.")
+    for r in rows:
+        size = f"{r['size'] / 1e6:>7.1f}".replace(".", ",")
+        print(f"{'*' if r['current'] else ' '} {r['name']:<42} {r['kind']:<9} {size} Mo")
+
+
+def prune(db_path=None, keep=None) -> None:
+    """Supprime les anciennes versions (garde les *keep* plus récentes + la courante)."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    removed = versions.prune(db_path, keep)
+    for p in removed:
+        print(f"Supprimée : versions/{p.name}")
+    if not removed:
+        print("Rien à supprimer.")
+
+
+def snapshot(db_path=None) -> None:
+    """Copie la version courante avant une modification manuelle."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    target = versions.snapshot(db_path)
+    print(f"Lien : {Path(db_path).name} → versions/{target.name}")
+
+
+def restore(name, db_path=None) -> None:
+    """Pointe la base sur la version *name* (voir ``list_versions``)."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    target = versions.restore(db_path, name)
+    print(f"Lien : {Path(db_path).name} → versions/{target.name}")

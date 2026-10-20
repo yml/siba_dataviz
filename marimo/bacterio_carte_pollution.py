@@ -11,12 +11,22 @@ def _():
     import duckdb
     import math
     import plotly.express as px
+    from plotly.subplots import make_subplots
 
     from html import escape as escape_html
 
-    from siba.data.config import DB_PATH
+    from siba.data.config import DB_PATH, PIEZOMETERS
 
-    return DB_PATH, duckdb, escape_html, math, mo, px
+    return (
+        DB_PATH,
+        PIEZOMETERS,
+        duckdb,
+        escape_html,
+        make_subplots,
+        math,
+        mo,
+        px,
+    )
 
 
 @app.cell
@@ -327,6 +337,144 @@ def _(agg):
         )
 
     _recurrents()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Nappe et *E. coli* dans le temps
+
+    En haut, la profondeur du piézomètre choisi (axe inversé : nappe haute en
+    haut). En bas, chaque prélèvement *E. coli* des points sélectionnés, en
+    échelle **logarithmique**. Les deux panneaux partagent l'axe des dates.
+    Les valeurs censurées ont leur propre symbole : ▲ pour `>` (plafond du
+    laboratoire, la vraie valeur est supérieure), ▼ pour `<` (sous le seuil
+    de détection).
+    """)
+    return
+
+
+@app.cell
+def _(DB_PATH, PIEZOMETERS, duckdb):
+    _con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        ecoli_pts = _con.execute(
+            """
+            SELECT point, date_prelevement AS date, ecoli, ecoli_censure AS cens
+            FROM analyse_bacterio
+            WHERE ecoli IS NOT NULL
+            ORDER BY point, date_prelevement
+            """
+        ).df()
+        # Mesures brutes (depuis 2010) plutôt que nappe_pluie_daily (2015 →) :
+        # les premiers résultats E. coli datent de 2014.
+        nappe_brute = _con.execute(
+            "SELECT code_bss, date_mesure AS date, profondeur_nappe "
+            "FROM nappe_mesure ORDER BY date_mesure"
+        ).df()
+    finally:
+        _con.close()
+    # Colonne courte (Blagon, Biganos…) → code BSS du piézomètre.
+    CODE_PIEZO = {p["col"]: p["code_bss"] for p in PIEZOMETERS}
+    return CODE_PIEZO, ecoli_pts, nappe_brute
+
+
+@app.cell
+def _(CODE_PIEZO, ecoli_pts, mo):
+    _points = sorted(ecoli_pts["point"].unique().tolist())
+    _defaut = [p for p in ("0302-LEBETEY", "0407-LEMASSURAT", "0805-RDB") if p in _points]
+    piezo_ecoli = mo.ui.dropdown(
+        options=list(CODE_PIEZO),
+        value="Biganos" if "Biganos" in CODE_PIEZO else list(CODE_PIEZO)[0],
+        label="Piézomètre",
+    )
+    points_ecoli = mo.ui.multiselect(
+        options=_points, value=_defaut, label="Points de prélèvement"
+    )
+    mo.hstack([piezo_ecoli, points_ecoli], justify="start", gap=2)
+    return piezo_ecoli, points_ecoli
+
+
+@app.cell
+def _(
+    CODE_PIEZO,
+    ecoli_pts,
+    make_subplots,
+    mo,
+    nappe_brute,
+    piezo_ecoli,
+    points_ecoli,
+):
+    mo.stop(
+        not points_ecoli.value,
+        mo.md("Choisir au moins un point de prélèvement."),
+    )
+
+    def _figure():
+        # Couleur fixe par point : sa place dans la liste complète des points,
+        # pour qu'un point garde sa couleur quand la sélection change. Les
+        # trois points par défaut ont des teintes réservées, bien distinctes.
+        palette = ["#0066cc", "#cc6600", "#8a3ffc", "#1f9e89", "#d4237a",
+                   "#6b8e23", "#b8860b", "#5f6b7a", "#e4402f", "#008b8b"]
+        reserves = {"0302-LEBETEY": "#d4237a", "0407-LEMASSURAT": "#1f9e89",
+                    "0805-RDB": "#cc6600"}
+        tous = sorted(ecoli_pts["point"].unique())
+        libres = [c for c in palette if c not in reserves.values()]
+        couleur = {p: reserves.get(p, libres[i % len(libres)])
+                   for i, p in enumerate(tous)}
+
+        sel = ecoli_pts[ecoli_pts["point"].isin(points_ecoli.value)]
+        debut, fin = sel["date"].min(), sel["date"].max()
+        code = CODE_PIEZO[piezo_ecoli.value]
+        nappe = nappe_brute[
+            (nappe_brute["code_bss"] == code)
+            & (nappe_brute["date"] >= debut)
+            & (nappe_brute["date"] <= fin)
+        ]
+
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
+            row_heights=[0.35, 0.65],
+        )
+        fig.add_scatter(
+            x=nappe["date"], y=nappe["profondeur_nappe"], mode="lines",
+            line={"color": "#5f6b7a", "width": 1.5},
+            name=f"Nappe {piezo_ecoli.value}",
+            hovertemplate="%{x|%d/%m/%Y} : %{y:.2f} m<extra></extra>",
+            row=1, col=1,
+        )
+        for p in points_ecoli.value:
+            d = sel[sel["point"] == p]
+            # « = » : valeur exacte ; « > » / « < » : censurée.
+            cens = d["cens"].fillna("=")
+            symbole = {">": "triangle-up", "<": "triangle-down"}
+            fig.add_scatter(
+                x=d["date"], y=d["ecoli"], mode="lines+markers", name=p,
+                line={"color": couleur[p], "width": 1},
+                marker={
+                    "color": couleur[p], "size": 7,
+                    "symbol": [symbole.get(c, "circle") for c in cens],
+                },
+                customdata=cens.replace("=", ""),
+                hovertemplate=(f"<b>{p}</b><br>%{{x|%d/%m/%Y}} : "
+                               "%{customdata}%{y:,.0f} UFC/100 mL<extra></extra>"),
+                row=2, col=1,
+            )
+        fig.update_yaxes(title_text="Profondeur (m)", autorange="reversed",
+                         row=1, col=1)
+        fig.update_yaxes(title_text="E. coli (UFC/100 mL)", type="log",
+                         row=2, col=1)
+        fig.update_layout(
+            height=620, hovermode="x unified",
+            title={"text": f"Nappe {piezo_ecoli.value} et <i>E. coli</i>",
+                   "x": 0.01, "xanchor": "left"},
+            legend={"orientation": "h", "y": -0.08},
+            margin={"l": 60, "r": 20, "t": 50, "b": 40},
+        )
+        return fig
+
+    _figure()
     return
 
 

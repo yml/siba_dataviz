@@ -100,12 +100,12 @@ def _(base64, gzip, io, pd):
     NAPPE_COLS = ["Blagon", "Piraillan", "Biganos", "La_Teste"]
     return NAPPE_COLS, df, episodes'''
 
-OLD_TITLE = '''    Version réactive inspirée de `notebooks/analyse_nappe_pluie_2026.ipynb`, lisant
-    `siba.duckdb` (`v_nappe_pluie_events` + `hc_period`).'''
+OLD_TITLE = '''    Version réactive inspirée de l'ancien notebook analyse_nappe_pluie_2026
+    (supprimé), lisant `siba.duckdb` (`v_nappe_pluie_events` + `hc_period`).'''
 
-NEW_TITLE = '''    Version réactive inspirée de `notebooks/analyse_nappe_pluie_2026.ipynb`. Les
-    données (nappe, pluie, épisodes HC) sont **embarquées** dans le notebook — page
-    autonome, aucune base ni serveur requis.'''
+NEW_TITLE = '''    Version réactive inspirée de l'ancien notebook analyse_nappe_pluie_2026
+    (supprimé). Les données (nappe, pluie, épisodes HC) sont **embarquées**
+    dans le notebook — page autonome, aucune base ni serveur requis.'''
 
 OLD_APP = 'app = marimo.App(width="full", auto_download=["html"], sql_output="native")'
 NEW_APP = 'app = marimo.App(width="full")'

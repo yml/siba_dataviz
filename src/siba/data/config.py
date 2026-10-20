@@ -7,6 +7,14 @@ from siba.paths import DATA_DIR
 #: Base DuckDB (respecte SIBA_DATA_DIR via DATA_DIR).
 DB_PATH = DATA_DIR / "siba.duckdb"
 
+#: Nombre de versions gardées par `prune` (défaut de --keep) : les plus récentes
+#: par nom ; la courante est épargnée même si elle est plus ancienne. Aucune
+#: version n'est supprimée automatiquement.
+VERSIONS_KEEP = 5
+
+#: Fichiers sources tels que téléchargés (JSON Hub'eau, .csv.gz Météo-France).
+SOURCES_DIR = DATA_DIR / "sources"
+
 #: Fixture TOML des événements curés (HC réseau EU + interdictions coquillages).
 EVENTS_TOML = Path(__file__).parent / "fixtures" / "events.toml"
 
@@ -58,11 +66,30 @@ NAPPE_START_YEAR = 2010
 #: Début de la table fusionnée journalière.
 DAILY_START = "2015-01-01"
 
-#: Fichiers Météo-France Gironde (data.gouv.fr, redirigés vers OVH S3).
+#: Fichiers Météo-France Gironde (data.gouv.fr, redirigés vers OVH S3). L'ordre
+#: est l'ordre d'ingestion : le plus récent en dernier.
 METEO_URLS = {
+    # Archive avant 1950 (figée, chargée par rebuild seulement).
+    "historical": "https://www.data.gouv.fr/api/1/datasets/r/f74e1970-5462-4981-87e5-fb535b2c1af1",
     "previous": "https://www.data.gouv.fr/api/1/datasets/r/b0e78f3d-9085-4d6d-a47d-6d942f5e9a54",
     "latest": "https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50",
 }
+
+#: Postes Météo-France conservés dans meteo_jour (filtre à l'ingestion). Un
+#: poste hors liste reste disponible dans les fichiers sources.
+METEO_STATIONS = [
+    "33236002",  # Cap-Ferret, 1921 → : référence ; rupture de site le 11/07/2023
+    "33529001",  # Cazaux (base aérienne), 1921 → : même site depuis 1944, classe B
+    "33122003",  # Pierroton-INRAE (Cestas), 2002 → : intérieur, classe E
+    "33042001",  # Belin-Béliet, 1881 → : changement de pluviomètre 21/07/2021 sans effet visible
+    "33051001",  # Biganos, 1964–2021 : rive est, près de la STEP
+    "33236004",  # Lège-Bourg, 2003–2020 : rive nord
+    "33011001",  # Arès, 1882–2003 : rive nord-est
+    "33009001",  # Arcachon, 1947–2001 : rivage
+    "33019001",  # Audenge Agglomération, 1882–1906 : utilisé par l'ancienne analyse 70 mm
+    "33529004",  # La Teste-de-Buch-La Salie, 1881–1950 : plus longue série avant 1950
+    "33009004",  # Arcachon Agglomération - CMD, 1885–1946 : longue série d'Arcachon
+]
 
 #: Descriptif officiel des champs Météo-France (mis en cache dans _data au rebuild).
 METEO_DESCRIPTOR_URL = "https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv"

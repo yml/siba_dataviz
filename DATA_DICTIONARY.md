@@ -9,6 +9,20 @@ colonne. URLs des sources : voir [Sources](#sources) en bas de page.
 Le descriptif officiel des champs Météo-France est mis en cache dans
 `_data/Q_descriptif_champs_RR-T-Vent.csv` (téléchargé depuis data.gouv / OVH).
 
+**Fichiers sources.** Chaque chargement lit des fichiers locaux, gardés sous
+`_data/sources/` pour pouvoir vérifier les données brutes :
+
+- `_data/sources/hubeau/<code_bss avec / → _>/<année>.json` : JSON brut de
+  l'API, tous les champs, pages de 1000 fusionnées (ex.
+  `hubeau/08262X0023_F/2025.json`) ;
+- `_data/sources/meteofrance/{historical,previous,latest}.csv.gz` : fichiers
+  tels que téléchargés, tous les postes de Gironde (la base n'en garde que
+  11, voir `meteo_jour`).
+
+`update` retélécharge toujours sa portée, `rebuild` ne télécharge que les
+fichiers absents, `make refresh` (`rebuild --refresh`) retélécharge tout. Pour
+retélécharger un seul fichier : le supprimer, puis `make rebuild`.
+
 ---
 
 ## `station` — dimension des points de mesure
@@ -47,14 +61,40 @@ Grain : une ligne par (`code_bss`, `date_mesure`). Clé primaire
 | `urn_bss` | VARCHAR | URN du point d'eau dans ADES |
 | `timestamp_mesure` | BIGINT | horodatage epoch (ms) de la mesure |
 
+**Piraillan, 16/03/2026.** `profondeur_nappe` à Piraillan (`08257X0086/F`)
+saute de +0,99 m (2,84 → 3,83 m) alors que `niveau_nappe_eau` reste continu
+(1,74 → 1,73 m NGF) : changement probable de repère de mesure. La donnée n'est
+pas corrigée ; comparer les profondeurs de part et d'autre de cette date avec
+prudence.
+
 ---
 
 ## `meteo_jour` — données quotidiennes Météo-France (Gironde)
 
-Grain : une ligne par (`NUM_POSTE`, `date`), toutes les stations de Gironde,
-toutes les colonnes brutes du fichier `Q_33_*_RR-T-Vent`. Clé primaire
-`(NUM_POSTE, date)`. Les colonnes brutes sont stockées en VARCHAR (verbatim) ;
-la colonne `date` (DATE) est dérivée de `AAAAMMJJ`.
+La table compte une ligne par poste et par jour (`NUM_POSTE`, `date`), pour
+les 11 postes de `config.METEO_STATIONS` (filtre à l'ingestion), avec toutes
+les colonnes brutes des fichiers `Q_33_*_RR-T-Vent`. Clé primaire `(NUM_POSTE, date)`. Les colonnes
+brutes sont stockées en VARCHAR (verbatim) ; la colonne `date` (DATE) est
+dérivée de `AAAAMMJJ`. Environ 260 000 lignes, de 1881 à aujourd'hui, archive
+avant 1950 comprise. Un poste hors liste reste disponible dans les fichiers
+sources ; l'ajouter = compléter la liste puis `make rebuild`.
+
+| poste | `NUM_POSTE` | période | rôle |
+|---|---|---|---|
+| Cap-Ferret | 33236002 | 1921 → | référence des notebooks ; rupture de site le 11/07/2023 |
+| Cazaux | 33529001 | 1921 → | même site depuis 1944, mesure classe B |
+| Pierroton-INRAE (Cestas) | 33122003 | 2002 → | intérieur, mesure classe E |
+| Belin-Béliet | 33042001 | 1881 → | intérieur ; changement de pluviomètre le 21/07/2021, sans effet visible |
+| Biganos | 33051001 | 1964 – 2021 | rive est, près de la STEP |
+| Lège-Bourg | 33236004 | 2003 – 2020 | rive nord |
+| Arès | 33011001 | 1882 – 2003 | rive nord-est |
+| Arcachon | 33009001 | 1947 – 2001 | rivage |
+| Audenge Agglomération | 33019001 | 1882 – 1906 | utilisé par l'ancienne analyse 70 mm |
+| La Teste-de-Buch-La Salie | 33529004 | 1881 – 1950 | plus longue série avant 1950 |
+| Arcachon Agglomération - CMD | 33009004 | 1885 – 1946 | longue série d'Arcachon |
+
+Comparaison des postes et rupture de Cap-Ferret : notebook
+`marimo/comparaison_stations_pluie.py`.
 
 À chaque grandeur `X` est associé un **code qualité** `QX` :
 
@@ -235,10 +275,11 @@ Données récupérées directement depuis les portails open data (voir
 ### Pluie — Météo-France (données climatologiques quotidiennes, Gironde)
 
 - Portail open data : <https://meteo.data.gouv.fr/>
+- Fichier « historical » (avant 1950, `Q_33_avant-1949_RR-T-Vent.csv.gz`) : <https://www.data.gouv.fr/api/1/datasets/r/f74e1970-5462-4981-87e5-fb535b2c1af1>
 - Fichier « previous » (1950-2024) : <https://www.data.gouv.fr/api/1/datasets/r/b0e78f3d-9085-4d6d-a47d-6d942f5e9a54>
 - Fichier « latest » (année en cours) : <https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50>
 - Descriptif des champs : <https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv>
-- Poste utilisé : Cap-Ferret `33236002`
+- Référence : Cap-Ferret `33236002` ; postes chargés : voir `meteo_jour`
 
 ---
 

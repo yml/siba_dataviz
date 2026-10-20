@@ -8,7 +8,6 @@ _local/
 __pycache__/
 *.pyc
 
-.ipynb_checkpoints/
 .marimo.toml
 marimo/__marimo__/
 marimo/layouts/

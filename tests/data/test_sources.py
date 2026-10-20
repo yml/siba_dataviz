@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 import pytest
 import requests
@@ -25,12 +27,10 @@ class _FakeResp:
 
 
 class _FakeSession:
-    """Renvoie une page de données puis une page vide (fin de pagination)."""
+    """Sert les pages données dans l'ordre, puis une page vide (fin de pagination)."""
 
-    def __init__(self, records):
-        self._pages = [
-            {"data": records, "next": None},
-        ]
+    def __init__(self, pages):
+        self._pages = pages
         self.calls = 0
 
     def get(self, url, params=None, timeout=None):
@@ -39,29 +39,59 @@ class _FakeSession:
         return _FakeResp(page)
 
 
-def test_fetch_nappe_year_maps_columns():
-    rec = {
-        "code_bss": "08262X0023/F", "date_mesure": "2024-01-01",
-        "niveau_nappe_eau": 45.44, "profondeur_nappe": 1.26,
-        "statut": "Donnée contrôlée niveau 2", "qualification": "Correcte",
-        "mode_obtention": "Valeur mesurée", "code_producteur": "327",
-        "nom_producteur": "SGR Aquitaine", "code_nature_mesure": "N",
-        "urn_bss": "http://x", "timestamp_mesure": 1704124800000,
-    }
-    df = sources.fetch_nappe_year("08262X0023/F", 2024, session=_FakeSession([rec]))
+_REC = {
+    "code_bss": "08262X0023/F", "date_mesure": "2024-01-01",
+    "niveau_nappe_eau": 45.44, "profondeur_nappe": 1.26,
+    "statut": "Donnée contrôlée niveau 2", "qualification": "Correcte",
+    "mode_obtention": "Valeur mesurée", "code_producteur": "327",
+    "nom_producteur": "SGR Aquitaine", "code_nature_mesure": "N",
+    "urn_bss": "http://x", "timestamp_mesure": 1704124800000,
+    "code_continuite": "2",
+}
+
+
+@pytest.mark.functional
+def test_download_nappe_year_writes_merged_pages_with_all_fields(tmp_path):
+    rec1 = _REC
+    rec2 = {**_REC, "date_mesure": "2024-01-02", "profondeur_nappe": 1.3}
+    sess = _FakeSession([{"data": [rec1], "next": "url"}, {"data": [rec2], "next": None}])
+    dest = tmp_path / "x" / "2024.json"
+    out = sources.download_nappe_year("08262X0023/F", 2024, dest, session=sess)
+    assert out == dest
+    # Les deux pages fusionnées, champ hors schéma (code_continuite) conservé.
+    assert json.loads(dest.read_text(encoding="utf-8")) == [rec1, rec2]
+    assert not [p for p in dest.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+@pytest.mark.functional
+def test_download_nappe_year_empty_writes_empty_list(tmp_path):
+    dest = tmp_path / "2024.json"
+    sources.download_nappe_year("X/F", 2024, dest, session=_FakeSession([]))
+    assert json.loads(dest.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.functional
+def test_read_nappe_year_maps_columns(tmp_path):
+    path = tmp_path / "2024.json"
+    path.write_text(json.dumps([_REC]), encoding="utf-8")
+    df = sources.read_nappe_year(path)
     assert list(df.columns) == NAPPE_COLS
     assert len(df) == 1
     assert df.loc[0, "profondeur_nappe"] == 1.26
     assert pd.api.types.is_datetime64_any_dtype(df["date_mesure"])
 
 
-def test_fetch_nappe_year_empty_has_columns():
-    df = sources.fetch_nappe_year("X/F", 2024, session=_FakeSession([]))
+@pytest.mark.functional
+def test_read_nappe_year_empty_has_columns(tmp_path):
+    path = tmp_path / "2024.json"
+    path.write_text("[]", encoding="utf-8")
+    df = sources.read_nappe_year(path)
     assert list(df.columns) == NAPPE_COLS
     assert df.empty
 
 
-def test_download_meteo_file_gunzips(tmp_path, monkeypatch):
+@pytest.mark.functional
+def test_download_meteo_file_keeps_gz_as_downloaded(tmp_path, monkeypatch):
     import gzip
     import io
 
@@ -91,9 +121,11 @@ def test_download_meteo_file_gunzips(tmp_path, monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(sources.requests, "get", _fake_get)
-    out = sources.download_meteo_file("https://data.gouv/whatever", tmp_path)
-    assert out.suffix == ".csv"
-    assert out.read_bytes() == payload
+    dest = tmp_path / "mf" / "latest.csv.gz"
+    out = sources.download_meteo_file("https://data.gouv/whatever", dest)
+    assert out == dest
+    assert dest.read_bytes() == gz_bytes  # tel que téléchargé, pas décompressé
+    assert not [p for p in dest.parent.iterdir() if p.name.endswith(".tmp")]
 
 
 def test_download_meteo_descriptor_writes_file(tmp_path, monkeypatch):
@@ -154,24 +186,32 @@ class _AlwaysStatus:
         return _FakeResp({}, status=self.status)
 
 
-def test_fetch_nappe_year_retries_on_timeout():
+@pytest.mark.functional
+def test_download_nappe_year_retries_on_timeout(tmp_path):
     rec = {"code_bss": "A/F", "date_mesure": "2024-01-01", "profondeur_nappe": 1.0}
     sess = _TimeoutThenOk([rec])
-    df = sources.fetch_nappe_year("A/F", 2024, session=sess)
-    assert len(df) == 1
+    dest = tmp_path / "2024.json"
+    sources.download_nappe_year("A/F", 2024, dest, session=sess)
+    assert json.loads(dest.read_text(encoding="utf-8")) == [rec]
     assert sess.calls == 2  # retried after the first timeout
 
 
-def test_fetch_nappe_year_raises_on_persistent_5xx():
+@pytest.mark.functional
+def test_download_nappe_year_raises_on_persistent_5xx(tmp_path):
     sess = _AlwaysStatus(500)
+    dest = tmp_path / "2024.json"
     with pytest.raises(RuntimeError):
-        sources.fetch_nappe_year("A/F", 2024, session=sess)
+        sources.download_nappe_year("A/F", 2024, dest, session=sess)
     assert sess.calls == config.NAPPE_MAX_RETRIES  # retried, then gave up
+    assert not dest.exists()
 
 
-def test_fetch_nappe_year_raises_on_client_error():
+@pytest.mark.functional
+def test_download_nappe_year_raises_on_client_error(tmp_path):
     # A 404 is a real failure, not "no data": it must surface, not return empty.
     sess = _AlwaysStatus(404)
+    dest = tmp_path / "2024.json"
     with pytest.raises(requests.exceptions.HTTPError):
-        sources.fetch_nappe_year("A/F", 2024, session=sess)
+        sources.download_nappe_year("A/F", 2024, dest, session=sess)
     assert sess.calls == 1  # client error is not retried
+    assert not dest.exists()

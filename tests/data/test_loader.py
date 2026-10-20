@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import shutil
 from pathlib import Path
 
@@ -15,6 +16,25 @@ def _con(tmp_path):
     return c
 
 
+def _record(code_bss, year):
+    """Un enregistrement Hub'eau brut (12 champs) au 1er juin de *year*."""
+    return {
+        "code_bss": code_bss, "date_mesure": f"{year}-06-01",
+        "niveau_nappe_eau": 10.0, "profondeur_nappe": 1.0,
+        "statut": "s", "qualification": "Correcte", "mode_obtention": "m",
+        "code_producteur": "327", "nom_producteur": "p",
+        "code_nature_mesure": "N", "urn_bss": "u", "timestamp_mesure": 1,
+    }
+
+
+def _fake_download(code_bss, year, dest, **kwargs):
+    """Remplace sources.download_nappe_year : écrit un JSON d'un enregistrement."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps([_record(code_bss, year)]), encoding="utf-8")
+    return dest
+
+
 def _fake_nappe(code_bss, year, **kwargs):
     return pd.DataFrame({
         "code_bss": [code_bss],
@@ -26,10 +46,11 @@ def _fake_nappe(code_bss, year, **kwargs):
     })
 
 
+@pytest.mark.functional
 def test_load_nappe_prints_progress(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     con = _con(tmp_path)
-    loader._load_nappe(con, [2024], fetch=_fake_nappe)
+    loader._load_nappe(con, [2024], refresh=True, download=_fake_download)
     out = capsys.readouterr().out
     assert "Blagon (Lanton)" in out  # per piézo
     assert "2024" in out             # per year
@@ -50,33 +71,36 @@ def test_update_prints_start_and_build_lines(tmp_path, monkeypatch, capsys):
     con.close()
 
 
-def _run_update_with_fakes(dbp, monkeypatch, meteo_csv):
-    """Run a real update() but with fake network (nappe fetch + meteo download)."""
+def _run_update_with_fakes(dbp, monkeypatch, meteo_csv_gz):
+    """Run a real update() but with fake network (nappe + meteo downloads)."""
     monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     real_nappe = loader._load_nappe
     real_meteo = loader._load_meteo
     monkeypatch.setattr(
         loader, "_load_nappe",
-        lambda con, years, **kw: real_nappe(con, years, fetch=_fake_nappe),
+        lambda con, years, **kw: real_nappe(con, years, refresh=True, download=_fake_download),
     )
     monkeypatch.setattr(
         loader, "_load_meteo",
-        lambda con, keys, **kw: real_meteo(con, keys, download=_copy_download(meteo_csv)),
+        lambda con, keys, **kw: real_meteo(
+            con, keys, refresh=True, download=_copy_download(meteo_csv_gz)
+        ),
     )
     loader.update(db_path=dbp)
 
 
-def test_format_summary_reports_counts_and_ranges(tmp_path, monkeypatch, meteo_csv):
+@pytest.mark.functional
+def test_format_summary_reports_counts_and_ranges(tmp_path, monkeypatch, meteo_csv_gz):
     dbp = tmp_path / "s.duckdb"
-    _run_update_with_fakes(dbp, monkeypatch, meteo_csv)
+    _run_update_with_fakes(dbp, monkeypatch, meteo_csv_gz)
     con = schema.connect(dbp)
     s = loader.format_summary(con, "update")
     con.close()
     # mode + all three table names + their counts (one fake nappe row per
-    # piezometer and year, update = 2 years; 3 meteo rows)
+    # piezometer and year, update = 2 years; 2 meteo rows of the curated station)
     assert "update" in s
     assert f"nappe_mesure={2 * len(config.PIEZOMETERS)}" in s
-    assert "meteo_jour=3" in s
+    assert "meteo_jour=2" in s
     assert "nappe_pluie_daily=" in s
     # ingest_log rows from this run, with a date range arrow
     assert "hubeau" in s
@@ -93,10 +117,11 @@ def test_update_prints_summary(tmp_path, monkeypatch, capsys):
     assert "nappe_mesure=" in out
 
 
+@pytest.mark.functional
 def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
     con = _con(tmp_path)
-    n, dmin, dmax = loader._load_nappe(con, [2024], fetch=_fake_nappe)
+    n, dmin, dmax = loader._load_nappe(con, [2024], refresh=True, download=_fake_download)
     assert n == len(config.PIEZOMETERS)
     # the loader reports the date range actually loaded (fed to ingest_log)
     assert dmin == dt.date(2024, 6, 1)
@@ -104,64 +129,107 @@ def test_load_nappe_upserts_all_piezos(tmp_path, monkeypatch):
     count = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
     assert count == len(config.PIEZOMETERS)
     # idempotent: re-run does not duplicate
-    loader._load_nappe(con, [2024], fetch=_fake_nappe)
+    loader._load_nappe(con, [2024], refresh=True, download=_fake_download)
     count2 = con.execute("SELECT COUNT(*) FROM nappe_mesure").fetchone()[0]
     assert count2 == len(config.PIEZOMETERS)
     con.close()
 
 
-def _copy_download(meteo_csv, seen=None):
-    def _dl(url, dest_dir):
-        dest = Path(dest_dir) / "Q_33.csv"
-        shutil.copy(meteo_csv, dest)
-        if seen is not None:
-            seen["dir"] = Path(dest_dir)
+def _copy_download(meteo_csv_gz, calls=None):
+    """Remplace sources.download_meteo_file : copie le .csv.gz vers *dest*."""
+    def _dl(url, dest):
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(meteo_csv_gz, dest)
+        if calls is not None:
+            calls.append((url, dest))
         return dest
 
     return _dl
 
 
-def test_load_meteo_upserts_all_rows_and_columns(tmp_path, meteo_csv):
+@pytest.mark.functional
+def test_load_meteo_keeps_only_curated_stations(tmp_path, meteo_csv_gz):
     con = _con(tmp_path)
-    seen = {}
-    n, dmin, dmax = loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv, seen))
-    assert n == 3  # all Gironde stations kept, not just Cap-Ferret
+    n, dmin, dmax = loader._load_meteo(
+        con, ["latest"], refresh=True, download=_copy_download(meteo_csv_gz)
+    )
+    assert n == 2  # 33999999 n'est pas dans METEO_STATIONS
     assert dmin == dt.date(2025, 1, 1)
     assert dmax == dt.date(2025, 1, 2)
     count = con.execute("SELECT COUNT(*) FROM meteo_jour").fetchone()[0]
-    assert count == 3
+    assert count == 2
+    assert con.execute(
+        "SELECT COUNT(*) FROM meteo_jour WHERE NUM_POSTE = '33999999'"
+    ).fetchone()[0] == 0
     # every raw column landed; a column absent from the file is present as NULL
     cols = [r[1] for r in con.execute("PRAGMA table_info('meteo_jour')").fetchall()]
     for raw in config.METEO_COLUMNS:
         assert raw in cols
     assert con.execute("SELECT COUNT(*) FROM meteo_jour WHERE TX IS NOT NULL").fetchone()[0] == 0
-    # date typed as DATE and the (NUM_POSTE, date) key holds (2 Cap-Ferret days)
+    # date typed as DATE
     date_type = con.execute(
         "SELECT data_type FROM information_schema.columns "
         "WHERE table_name = 'meteo_jour' AND column_name = 'date'"
     ).fetchone()[0]
     assert date_type == "DATE"
-    n_cf = con.execute(
-        "SELECT COUNT(*) FROM meteo_jour WHERE NUM_POSTE = ?",
-        [config.CAP_FERRET_NUM_POSTE],
-    ).fetchone()[0]
-    assert n_cf == 2
-    # temp dir cleaned up
-    assert not seen["dir"].exists()
+    # le fichier source reste sur disque
+    assert (config.SOURCES_DIR / "meteofrance" / "latest.csv.gz").exists()
     con.close()
 
 
-def test_load_meteo_idempotent(tmp_path, meteo_csv):
+@pytest.mark.functional
+def test_load_meteo_skips_download_when_file_exists(tmp_path, meteo_csv_gz):
+    dest = config.SOURCES_DIR / "meteofrance" / "latest.csv.gz"
+    dest.parent.mkdir(parents=True)
+    shutil.copy(meteo_csv_gz, dest)
+
+    def _no_download(url, dest):
+        raise AssertionError("ne doit pas télécharger")
+
     con = _con(tmp_path)
-    loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv))
-    loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv))
-    assert con.execute("SELECT COUNT(*) FROM meteo_jour").fetchone()[0] == 3
+    n, _, _ = loader._load_meteo(con, ["latest"], refresh=False, download=_no_download)
+    assert n == 2
+    calls = []
+    loader._load_meteo(con, ["latest"], refresh=True, download=_copy_download(meteo_csv_gz, calls))
+    assert calls == [(config.METEO_URLS["latest"], dest)]
     con.close()
 
 
-def test_v_meteo_interest_only_returns_stations_of_interest(tmp_path, meteo_csv):
+@pytest.mark.functional
+def test_load_nappe_downloads_only_missing_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
+    first = config.PIEZOMETERS[0]["code_bss"]
+    _fake_download(first, 2024, config.SOURCES_DIR / "hubeau" / "08262X0023_F" / "2024.json")
+    calls = []
+
+    def _recording(code_bss, year, dest, **kw):
+        calls.append(code_bss)
+        return _fake_download(code_bss, year, dest)
+
     con = _con(tmp_path)
-    loader._load_meteo(con, ["latest"], download=_copy_download(meteo_csv))
+    n, _, _ = loader._load_nappe(con, [2024], refresh=False, download=_recording)
+    assert calls == [p["code_bss"] for p in config.PIEZOMETERS[1:]]
+    assert n == len(config.PIEZOMETERS)  # le fichier déjà présent a été lu
+    calls.clear()
+    loader._load_nappe(con, [2024], refresh=True, download=_recording)
+    assert len(calls) == len(config.PIEZOMETERS)
+    con.close()
+
+
+@pytest.mark.functional
+def test_load_meteo_idempotent(tmp_path, meteo_csv_gz):
+    con = _con(tmp_path)
+    loader._load_meteo(con, ["latest"], refresh=True, download=_copy_download(meteo_csv_gz))
+    loader._load_meteo(con, ["latest"], refresh=True, download=_copy_download(meteo_csv_gz))
+    assert con.execute("SELECT COUNT(*) FROM meteo_jour").fetchone()[0] == 2
+    con.close()
+
+
+@pytest.mark.functional
+def test_v_meteo_interest_only_returns_stations_of_interest(tmp_path, meteo_csv_gz):
+    con = _con(tmp_path)
+    loader._load_meteo(con, ["latest"], refresh=True, download=_copy_download(meteo_csv_gz))
     rows = con.execute("SELECT num_poste, rr FROM v_meteo_interest ORDER BY date").fetchall()
     # only Cap-Ferret (of_interest), station 33999999 excluded; TRY_CAST maps rr
     assert rows == [("33236002", 0.0), ("33236002", 5.5)]
@@ -354,6 +422,45 @@ def test_rebuild_loads_all_years_and_files(tmp_path, monkeypatch):
     assert calls["years"][0] == config.NAPPE_START_YEAR
     assert calls["years"][-1] == dt.date.today().year
     assert set(calls["keys"]) == set(config.METEO_URLS)
+
+
+def _recorders(calls):
+    """Faux _load_nappe / _load_meteo qui notent leurs arguments nommés."""
+    def nappe(con, years, **kw):
+        calls["nappe"] = kw
+        return 7, None, None
+
+    def meteo(con, keys, **kw):
+        calls["meteo"] = kw
+        return 9, None, None
+
+    return nappe, meteo
+
+
+@pytest.mark.functional
+def test_update_refreshes_sources(tmp_path, monkeypatch):
+    calls = {}
+    nappe, meteo = _recorders(calls)
+    monkeypatch.setattr(loader, "_load_nappe", nappe)
+    monkeypatch.setattr(loader, "_load_meteo", meteo)
+    loader.update(db_path=tmp_path / "u.duckdb")
+    assert calls["nappe"]["refresh"] is True
+    assert calls["meteo"]["refresh"] is True
+
+
+@pytest.mark.functional
+def test_rebuild_passes_refresh_flag(tmp_path, monkeypatch):
+    calls = {}
+    nappe, meteo = _recorders(calls)
+    monkeypatch.setattr(loader, "_load_nappe", nappe)
+    monkeypatch.setattr(loader, "_load_meteo", meteo)
+    monkeypatch.setattr(loader.sources, "download_meteo_descriptor", lambda dest: None)
+    loader.rebuild(db_path=tmp_path / "r.duckdb", refresh=True)
+    assert calls["nappe"]["refresh"] is True
+    assert calls["meteo"]["refresh"] is True
+    loader.rebuild(db_path=tmp_path / "r2.duckdb")
+    assert calls["nappe"]["refresh"] is False
+    assert calls["meteo"]["refresh"] is False
 
 
 def test_rebuild_is_atomic_on_failure(tmp_path, monkeypatch):
@@ -597,3 +704,27 @@ def test_load_enki_missing_directory_deletes_nothing(tmp_path):
     con.close()
     assert (n, lo, hi) == (0, None, None)
     assert kept == 1  # pas de dossier : on ne touche à rien
+
+
+@pytest.mark.functional
+def test_load_nappe_redownloads_cached_empty_year(tmp_path, monkeypatch):
+    # Un [] en cache peut venir d'une panne amont (HTTP 200 sans données) :
+    # sans refresh, il est retéléchargé ; un fichier non vide ne l'est pas.
+    monkeypatch.setattr(config, "NAPPE_REQUEST_DELAY", 0)
+    vide, plein = (p["code_bss"] for p in config.PIEZOMETERS[:2])
+    path_vide = loader._nappe_path(vide, 2024)
+    path_vide.parent.mkdir(parents=True)
+    path_vide.write_text("[]", encoding="utf-8")
+    for p in config.PIEZOMETERS[1:]:
+        _fake_download(p["code_bss"], 2024, loader._nappe_path(p["code_bss"], 2024))
+    calls = []
+
+    def _recording(code_bss, year, dest, **kw):
+        calls.append(code_bss)
+        return _fake_download(code_bss, year, dest)
+
+    con = _con(tmp_path)
+    loader._load_nappe(con, [2024], refresh=False, download=_recording)
+    assert calls == [vide]
+    assert plein not in calls
+    con.close()
