@@ -1,7 +1,6 @@
 # Événements réseau EU / coquillages — Bassin d'Arcachon
 #
 # Données curées à la main (source de vérité pour la base DuckDB).
-# Extraites de notebooks/analyse_nappe_pluie_historique.ipynb.
 #
 # verified = true  → date confirmée par arrêté préfectoral / constat OFB officiel
 # verified = false → date estimée / rapportée (presse, lanceurs d'alerte)

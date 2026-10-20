@@ -26,8 +26,8 @@ def _(mo):
     mo.md("""
     # Épisode « hors de contrôle » — nappe vs pluie
 
-    Version réactive inspirée de `notebooks/analyse_nappe_pluie_2026.ipynb`, lisant
-    `siba.duckdb` (`v_nappe_pluie_events` + `hc_period`).
+    Version réactive inspirée de l'ancien notebook analyse_nappe_pluie_2026
+    (supprimé), lisant `siba.duckdb` (`v_nappe_pluie_events` + `hc_period`).
 
     Choisir un épisode « hors de contrôle » (HC) du réseau EU ci-dessous : les
     graphiques (timelines, superposition, nuage) et la comparaison statistique
