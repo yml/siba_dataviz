@@ -25,12 +25,15 @@ Tout est récupéré directement depuis les portails open data (voir
 **Pluie — Météo-France (données climatologiques quotidiennes, Gironde)**
 
 - Portail : <https://meteo.data.gouv.fr/>
-- Fichiers utilisés : `previous` (1950-2024)
+- Fichiers utilisés : `historical` (avant 1950, `Q_33_avant-1949_RR-T-Vent.csv.gz`)
+  <https://www.data.gouv.fr/api/1/datasets/r/f74e1970-5462-4981-87e5-fb535b2c1af1>,
+  `previous` (1950-2024)
   <https://www.data.gouv.fr/api/1/datasets/r/b0e78f3d-9085-4d6d-a47d-6d942f5e9a54>
   et `latest` (année en cours)
   <https://www.data.gouv.fr/api/1/datasets/r/5f196a76-ba4f-4aa7-af28-eff6c8797b50>
 - Descriptif des champs : <https://meteofrance.s3.sbg.io.cloud.ovh.net/data/synchro_ftp/BASE/QUOT/Q_descriptif_champs_RR-T-Vent.csv>
-- Poste utilisé : Cap-Ferret `33236002`
+- Référence : Cap-Ferret `33236002` ; postes chargés : les 11 de
+  `config.METEO_STATIONS` (voir `DATA_DICTIONARY.md`, table `meteo_jour`)
 
 ## Organisation
 
@@ -71,27 +74,88 @@ uv run marimo edit marimo/explore_nappe_pluie.py
 
 ## Base DuckDB (`siba.data`)
 
-Chargement des données directement depuis Hub'eau et Météo-France vers une base
-DuckDB locale `_data/siba.duckdb`, sans passer par le cache CSV.
+Chargement des données Hub'eau et Météo-France dans une base DuckDB locale
+`_data/siba.duckdb`. Les fichiers téléchargés restent sous `_data/sources/`
+(JSON Hub'eau par piézomètre et par année, `.csv.gz` Météo-France tels quels).
 
 ```sh
-# reconstruire la base de zéro
-uv run python -m siba.data rebuild
-
-# mise à jour incrémentale (année précédente + courante, fichier météo « latest »)
-uv run python -m siba.data update
+make rebuild    # reconstruit depuis _data/sources/ (télécharge ce qui manque)
+make refresh    # idem en retéléchargeant toutes les sources
+make update     # année précédente + courante (Hub'eau), fichier météo « latest »
+make versions   # liste les versions, la courante est marquée *
+make snapshot   # copie la version courante avant une modification manuelle
+make restore V=<nom>
+make prune      # supprime les anciennes versions (garde les 5 plus récentes)
 ```
 
-`rebuild` charge la nappe de 2010 à l'année en cours et les fichiers
-Météo-France `previous` (1950-2024) + `latest`. L'archive Météo-France
-antérieure à 1950 n'est volontairement pas chargée (la table journalière
-démarre en 2015). `update` ne recharge que l'année précédente et l'année en
-cours (Hub'eau) et le fichier `latest` (Météo-France).
+`rebuild` charge la nappe de 2010 à l'année en cours et les trois fichiers
+Météo-France (`historical` avant 1950, `previous` 1950-2024, `latest`).
+`update` retélécharge l'année précédente et l'année en cours (Hub'eau) et le
+fichier `latest` (Météo-France). Chaque commande a son équivalent
+`uv run python -m siba.data <commande>`.
 
-Tables : `nappe_mesure`, `meteo_jour` (toutes stations Gironde, colonnes
-brutes), `station`, `ingest_log`. Vues/dérivés : `v_meteo_interest` (stations
+Tables : `nappe_mesure`, `meteo_jour` (11 postes curés, colonnes brutes),
+`station`, `ingest_log`. Vues/dérivés : `v_meteo_interest` (stations
 d'intérêt), `nappe_pluie_daily` (table matérialisée : nappes interpolées +
 cumuls de pluie 7/14/28/56 j sur Cap-Ferret).
+
+### Versions de la base
+
+`_data/siba.duckdb` est un lien symbolique vers une version :
+`_data/versions/<aaaammjj_hhmmss>__(load|snapshot)__siba.duckdb`. `--db-path`
+et `SIBA_DATA_DIR` déplacent l'ensemble (le dossier `versions/` est toujours à
+côté du lien).
+
+**Lister** : `make versions` (ou `uv run python -m siba.data versions`).
+
+```
+  20261018_155239__load__siba.duckdb         load         95,2 Mo
+  20261020_093000__snapshot__siba.duckdb     snapshot     95,2 Mo
+* 20261020_101500__load__siba.duckdb         load         14,4 Mo
+```
+
+`*` = version courante. Une base `siba.duckdb` classique est migrée en
+première version au premier lancement, sans perte : elle garde son contenu
+d'avant (tous les postes de Gironde, sans l'archive avant 1950) et sa
+taille. Lancer ensuite une fois `make rebuild` pour obtenir les 11 postes curés
+depuis 1881.
+
+**Revenir en arrière** :
+
+1. `make versions` pour trouver le nom ;
+2. `make restore V=20261018_155239__load__siba.duckdb` ;
+3. redémarrer l'UI DuckDB ou relancer les notebooks (un client ouvert garde la
+   version qu'il a ouverte) ;
+4. pour revenir à la dernière version : `make versions`, puis
+   `make restore V=<dernier nom>`.
+
+Un `restore` ne copie rien et ne supprime rien : il déplace le lien.
+
+**Inspecter une version sans basculer** (DuckDB, depuis la racine du dépôt) :
+
+```sql
+ATTACH '_data/versions/<nom>' AS ancienne (READ_ONLY);
+SELECT count(*) FROM ancienne.nappe_mesure;
+```
+
+**Ce qui crée une version** : `update`, `rebuild`, `refresh` (`__load__`) et
+`snapshot` (`__snapshot__`). `update` et `snapshot` partent d'une copie de la
+version courante, `rebuild` et `refresh` d'une base vide. Chaque nouvelle
+version est construite dans un `.tmp`, puis le lien bascule d'un coup ; un
+chargement qui échoue ne touche ni au lien ni aux versions existantes.
+
+**Faire de la place** : aucune version n'est supprimée automatiquement.
+`make prune` garde les 5 versions les plus récentes (`VERSIONS_KEEP`) et
+supprime les autres ; `make prune N=3` en garde 3 (ou
+`uv run python -m siba.data prune --keep 3`). La version courante et une
+version qui a un `.wal` ne sont jamais supprimées. La commande affiche les
+fichiers supprimés.
+
+- Un chargement refuse de démarrer si la version courante a un `.wal` : un
+  client en écriture est ouvert (UI DuckDB), le fermer d'abord.
+- Un `.tmp` orphelin après un crash se supprime à la main.
+- Après un chargement, redémarrer l'UI DuckDB (`DETACH` / `ATTACH`) ou relancer
+  les notebooks pour voir la nouvelle version.
 
 Description détaillée des tables et colonnes : voir [`DATA_DICTIONARY.md`](DATA_DICTIONARY.md).
 
