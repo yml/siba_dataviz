@@ -1,4 +1,8 @@
-.PHONY: test rebuild refresh update versions snapshot restore prune export-wasm serve-wasm
+.PHONY: help test rebuild refresh update versions snapshot restore prune export-wasm serve-wasm
+
+# Lister les commandes disponibles
+help:
+	@awk '/^# /{c=substr($$0,3); next} /^[a-z][a-z-]*:/{if (c) printf "  %-12s %s\n", substr($$1,1,length($$1)-1), c} {c=""}' $(MAKEFILE_LIST)
 
 # Lancer la suite de tests
 test:

@@ -79,6 +79,7 @@ Chargement des données Hub'eau et Météo-France dans une base DuckDB locale
 (JSON Hub'eau par piézomètre et par année, `.csv.gz` Météo-France tels quels).
 
 ```sh
+make help       # liste toutes les commandes (aussi : make sans argument)
 make rebuild    # reconstruit depuis _data/sources/ (télécharge ce qui manque)
 make refresh    # idem en retéléchargeant toutes les sources
 make update     # année précédente + courante (Hub'eau), fichier météo « latest »
