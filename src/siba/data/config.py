@@ -7,6 +7,11 @@ from siba.paths import DATA_DIR
 #: Base DuckDB (respecte SIBA_DATA_DIR via DATA_DIR).
 DB_PATH = DATA_DIR / "siba.duckdb"
 
+#: Nombre de versions gardées par `prune` (défaut de --keep) : les plus récentes
+#: par nom ; la courante est épargnée même si elle est plus ancienne. Aucune
+#: version n'est supprimée automatiquement.
+VERSIONS_KEEP = 5
+
 #: Fichiers sources tels que téléchargés (JSON Hub'eau, .csv.gz Météo-France).
 SOURCES_DIR = DATA_DIR / "sources"
 

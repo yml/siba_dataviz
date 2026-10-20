@@ -3,6 +3,6 @@
 Paquet isolé : n'importe aucun des modules siba.nappe / meteo / merge.
 """
 
-from .loader import rebuild, update
+from .loader import list_versions, prune, rebuild, restore, snapshot, update
 
-__all__ = ["rebuild", "update"]
+__all__ = ["list_versions", "prune", "rebuild", "restore", "snapshot", "update"]

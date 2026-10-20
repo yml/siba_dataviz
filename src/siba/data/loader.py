@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import config, schema, sources
+from . import config, schema, sources, versions
 
 
 def _as_date(value):
@@ -346,12 +346,12 @@ def _log(con, source, scope, mode, rows, date_min=None, date_max=None) -> None:
 
 def update(db_path=None) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
-    con = schema.connect(db_path)
-    try:
+    versions.migrate(db_path)
+    with versions.new_version(db_path, "load") as con:
         print(f"siba.data update → {db_path}")
-        # Atomic: schema changes, loads, the derived rebuild and the log rows run
-        # in one transaction so a mid-run failure (e.g. meteo after nappe) rolls
-        # back and never leaves raw and derived data inconsistent.
+        # La version se construit dans un .tmp (copie de la courante) : un échec
+        # en cours de route (ex. météo après nappe) supprime le .tmp et laisse
+        # le lien sur la version courante, intacte.
         con.execute("BEGIN TRANSACTION")
         try:
             schema.create_all(con)  # IF NOT EXISTS / OR REPLACE: safe if tables exist
@@ -377,18 +377,18 @@ def update(db_path=None) -> None:
             con.execute("ROLLBACK")
             raise
         print(format_summary(con, "update"))
-    finally:
-        con.close()
 
 
 def rebuild(db_path=None, *, refresh=False) -> None:
     db_path = config.DB_PATH if db_path is None else db_path
-    con = schema.connect(db_path)
-    try:
+    versions.migrate(db_path)
+    # Version vide, pas une copie de la courante : drop_all la viderait aussitôt
+    # et le fichier garderait les blocs libérés.
+    with versions.new_version(db_path, "load", copy=False) as con:
         print(f"siba.data rebuild → {db_path}")
-        # Atomic: drop/create/load run in one transaction so a mid-run failure
-        # (e.g. a Hub'eau timeout) rolls back and preserves the existing data
-        # instead of leaving an emptied DB. DuckDB rolls back DDL and DML together.
+        # La version se construit dans un .tmp : un échec en cours de route
+        # (ex. timeout Hub'eau) supprime le .tmp et laisse le lien sur la
+        # version courante, intacte.
         con.execute("BEGIN TRANSACTION")
         try:
             schema.drop_all(con)
@@ -400,12 +400,12 @@ def rebuild(db_path=None, *, refresh=False) -> None:
             n_nappe, nmin, nmax = _load_nappe(con, years, refresh=refresh)
             n_meteo, mmin, mmax = _load_meteo(con, list(config.METEO_URLS), refresh=refresh)
 
-            # Garde-fou : `rebuild` efface avant de recharger. Si une source ne
+            # Garde-fou : `rebuild` repart d'une base vide. Si une source ne
             # renvoie rien (panne amont — Hub'eau a déjà répondu HTTP 200 avec
             # zéro ligne pendant une indisponibilité), on annule au lieu de
-            # committer une table vide : le ROLLBACK ci-dessous restaure les
-            # données précédentes. Zéro ligne sur toutes les années et tous les
-            # points n'est jamais un cas réel.
+            # publier une version vide : le .tmp est supprimé et le lien reste
+            # sur la version précédente. Zéro ligne sur toutes les années et
+            # tous les points n'est jamais un cas réel.
             if n_nappe == 0:
                 raise RuntimeError(
                     f"Hub'eau n'a renvoyé aucune mesure de nappe sur "
@@ -434,14 +434,51 @@ def rebuild(db_path=None, *, refresh=False) -> None:
         except Exception:
             con.execute("ROLLBACK")
             raise
-        # Rafraîchit le descriptif officiel des champs météo (best-effort : un
-        # échec réseau ne casse pas le rebuild, la base est déjà committée).
-        try:
-            descriptor = config.DATA_DIR / "Q_descriptif_champs_RR-T-Vent.csv"
-            sources.download_meteo_descriptor(descriptor)
-            print(f"Descriptif Météo-France mis en cache : {descriptor}")
-        except Exception as exc:
-            print(f"Avertissement : descriptif Météo-France non mis à jour ({exc})")
         print(format_summary(con, "rebuild"))
-    finally:
-        con.close()
+    # Rafraîchit le descriptif officiel des champs météo (best-effort : un
+    # échec réseau ne casse pas le rebuild, la nouvelle version est déjà en place).
+    try:
+        descriptor = config.DATA_DIR / "Q_descriptif_champs_RR-T-Vent.csv"
+        sources.download_meteo_descriptor(descriptor)
+        print(f"Descriptif Météo-France mis en cache : {descriptor}")
+    except Exception as exc:
+        print(f"Avertissement : descriptif Météo-France non mis à jour ({exc})")
+
+
+def list_versions(db_path=None) -> None:
+    """Affiche les versions de la base, la courante marquée ``*``."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    rows = versions.list_versions(db_path)
+    if not rows:
+        print("Aucune version.")
+    for r in rows:
+        size = f"{r['size'] / 1e6:>7.1f}".replace(".", ",")
+        print(f"{'*' if r['current'] else ' '} {r['name']:<42} {r['kind']:<9} {size} Mo")
+
+
+def prune(db_path=None, keep=None) -> None:
+    """Supprime les anciennes versions (garde les *keep* plus récentes + la courante)."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    removed = versions.prune(db_path, keep)
+    for p in removed:
+        print(f"Supprimée : versions/{p.name}")
+    if not removed:
+        print("Rien à supprimer.")
+
+
+def snapshot(db_path=None) -> None:
+    """Copie la version courante avant une modification manuelle."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    target = versions.snapshot(db_path)
+    print(f"Lien : {Path(db_path).name} → versions/{target.name}")
+
+
+def restore(name, db_path=None) -> None:
+    """Pointe la base sur la version *name* (voir ``list_versions``)."""
+    db_path = config.DB_PATH if db_path is None else db_path
+    versions.migrate(db_path)
+    target = versions.restore(db_path, name)
+    print(f"Lien : {Path(db_path).name} → versions/{target.name}")
