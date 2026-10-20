@@ -1,4 +1,4 @@
-"""Ligne de commande : siba update | rebuild."""
+"""Ligne de commande : siba update | rebuild [--refresh]."""
 
 from __future__ import annotations
 
@@ -24,10 +24,12 @@ def main(argv: list[str] | None = None) -> int:
     ):
         sp = sub.add_parser(name, help=help_text)
         sp.add_argument("--db-path", default=None, help="Chemin de la base DuckDB.")
+        if name == "rebuild":
+            sp.add_argument("--refresh", action="store_true", help="Retélécharge toutes les sources.")
 
     args = parser.parse_args(argv)
     if args.command == "rebuild":
-        loader.rebuild(db_path=args.db_path)
+        loader.rebuild(db_path=args.db_path, refresh=args.refresh)
     else:
         loader.update(db_path=args.db_path)
     return 0

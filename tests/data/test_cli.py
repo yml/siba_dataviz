@@ -22,10 +22,24 @@ def test_update_is_default(monkeypatch):
     assert "update" in called and "rebuild" not in called
 
 
+@pytest.mark.internal
 def test_rebuild_with_db_path(monkeypatch):
     called = {}
     monkeypatch.setattr(cli.loader, "update", lambda db_path=None: called.setdefault("update", True))
-    monkeypatch.setattr(cli.loader, "rebuild", lambda db_path=None: called.setdefault("db", db_path))
+    monkeypatch.setattr(
+        cli.loader, "rebuild", lambda db_path=None, refresh=False: called.setdefault("db", db_path)
+    )
     rc = cli.main(["rebuild", "--db-path", "/tmp/x.duckdb"])
     assert rc == 0
     assert called["db"] == "/tmp/x.duckdb"
+
+
+@pytest.mark.internal
+def test_rebuild_parses_refresh(monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        cli.loader, "rebuild", lambda db_path=None, refresh=False: called.append(refresh)
+    )
+    cli.main(["rebuild", "--refresh"])
+    cli.main(["rebuild"])
+    assert called == [True, False]

@@ -1,3 +1,5 @@
+import gzip
+
 import pytest
 
 from siba.data import config, schema
@@ -26,6 +28,15 @@ def meteo_csv(tmp_path):
     return path
 
 
+@pytest.fixture
+def meteo_csv_gz(tmp_path, meteo_csv):
+    """Le même CSV compressé, tel que Météo-France le publie (.csv.gz)."""
+    path = tmp_path / "Q_33_sample.csv.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        f.write(meteo_csv.read_text(encoding="utf-8"))
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _no_enki_dir(monkeypatch, tmp_path):
     """Isole les tests du dossier _data/enki/ du poste de développement.
@@ -35,3 +46,9 @@ def _no_enki_dir(monkeypatch, tmp_path):
     réellement ce chargement pointent explicitement vers un dossier temporaire.
     """
     monkeypatch.setattr(config, "ENKI_DIR", tmp_path / "enki-absent")
+
+
+@pytest.fixture(autouse=True)
+def _scratch_sources_dir(monkeypatch, tmp_path):
+    """Isole les tests du dossier _data/sources/ : rien n'est écrit hors tmp_path."""
+    monkeypatch.setattr(config, "SOURCES_DIR", tmp_path / "sources")

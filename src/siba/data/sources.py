@@ -1,10 +1,10 @@
-"""Fetchers purs : API/fichier → DataFrame, sans cache disque durable."""
+"""Téléchargement des sources sur disque et lecture des fichiers locaux."""
 
 from __future__ import annotations
 
-import gzip
+import json
+import os
 import re
-import shutil
 import time
 from pathlib import Path
 
@@ -45,17 +45,20 @@ def _get_with_retry(sess, url, params):
     raise last_exc
 
 
-def fetch_nappe_year(
+def download_nappe_year(
     code_bss: str,
     year: int,
+    dest,
     *,
     url: str = config.HUBEAU_URL,
     session: requests.Session | None = None,
-) -> pd.DataFrame:
-    """Récupère les chroniques Hub'eau d'un piézomètre pour une année.
+) -> Path:
+    """Télécharge les chroniques Hub'eau d'un piézomètre pour une année.
 
-    Pagination par pages de 1000 (``sort=asc``). Retourne un DataFrame aux
-    colonnes de ``nappe_mesure`` ; vide (mêmes colonnes) si aucune mesure.
+    Pagination par pages de 1000 (``sort=asc``). Les enregistrements bruts de
+    toutes les pages (tous les champs de l'API) sont écrits en un tableau JSON
+    dans *dest* ; ``[]`` si aucune mesure. Écriture dans un ``.tmp`` puis
+    renommage : un fichier à moitié écrit n'existe jamais.
     """
     sess = session or requests
     records: list[dict] = []
@@ -71,7 +74,7 @@ def fetch_nappe_year(
         }
         resp = _get_with_retry(sess, url, params)
         # A non-2xx here is a real API failure (e.g. 404), not "no data": surface
-        # it instead of returning an empty frame that looks like an empty year.
+        # it instead of writing an empty file that looks like an empty year.
         resp.raise_for_status()
         data = resp.json()
         batch = data.get("data", [])
@@ -83,8 +86,23 @@ def fetch_nappe_year(
         page += 1
         time.sleep(1)
 
-    df = pd.DataFrame(records)
-    df = df.reindex(columns=_NAPPE_COLS)
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False)
+    os.replace(tmp, dest)
+    return dest
+
+
+def read_nappe_year(path) -> pd.DataFrame:
+    """Lit un JSON Hub'eau local → DataFrame aux colonnes de ``nappe_mesure``.
+
+    Vide (mêmes colonnes) si le fichier ne contient aucune mesure.
+    """
+    with open(path, encoding="utf-8") as f:
+        records = json.load(f)
+    df = pd.DataFrame(records).reindex(columns=_NAPPE_COLS)
     if not df.empty:
         df["date_mesure"] = pd.to_datetime(df["date_mesure"], errors="coerce")
         df = df.dropna(subset=["date_mesure"])
@@ -92,26 +110,19 @@ def fetch_nappe_year(
     return df
 
 
-def download_meteo_file(url: str, dest_dir) -> Path:
-    """Télécharge *url* dans *dest_dir* (temp), décompresse .gz, renvoie le .csv."""
-    dest_dir = Path(dest_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
+def download_meteo_file(url: str, dest) -> Path:
+    """Télécharge *url* dans *dest* tel quel (.csv.gz, sans décompression)."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
     with requests.get(url, stream=True, timeout=120, allow_redirects=True) as resp:
         resp.raise_for_status()
-        fname = resp.url.split("/")[-1] or "meteo_download"
-        raw_path = dest_dir / fname
-        with open(raw_path, "wb") as out:
+        with open(tmp, "wb") as out:
             for chunk in resp.iter_content(chunk_size=1 << 16):
                 if chunk:
                     out.write(chunk)
-
-    if raw_path.suffix == ".gz":
-        csv_path = raw_path.with_suffix("")  # strip .gz
-        with gzip.open(raw_path, "rb") as f_in, open(csv_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-        raw_path.unlink(missing_ok=True)
-        return csv_path
-    return raw_path
+    os.replace(tmp, dest)
+    return dest
 
 
 def download_meteo_descriptor(dest_path) -> Path:

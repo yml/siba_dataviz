@@ -1,6 +1,8 @@
 import tomllib
 from pathlib import Path
 
+import pytest
+
 from siba.data import config
 
 
@@ -43,3 +45,22 @@ def test_rain_windows_and_meteo_columns():
     ]
     assert "RR" in config.METEO_COLUMNS
     assert len(config.METEO_COLUMNS) == 60
+
+
+@pytest.mark.internal
+def test_meteo_urls_order_and_keys():
+    # Ordre d'ingestion : le plus récent en dernier, il l'emporte sur un recouvrement.
+    assert list(config.METEO_URLS) == ["historical", "previous", "latest"]
+
+
+@pytest.mark.internal
+def test_meteo_stations_curated(monkeypatch):
+    from siba.paths import DATA_DIR
+
+    monkeypatch.undo()  # retire le SOURCES_DIR temporaire posé par conftest
+
+    assert len(config.METEO_STATIONS) == 11
+    assert len(set(config.METEO_STATIONS)) == 11
+    assert all(len(n) == 8 and n.isdigit() for n in config.METEO_STATIONS)
+    assert config.CAP_FERRET_NUM_POSTE in config.METEO_STATIONS
+    assert config.SOURCES_DIR == DATA_DIR / "sources"

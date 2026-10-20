@@ -1,4 +1,4 @@
-.PHONY: test rebuild update export-wasm serve-wasm
+.PHONY: test rebuild refresh update export-wasm serve-wasm
 
 # Lancer la suite de tests
 test:
@@ -7,6 +7,10 @@ test:
 # Reconstruire la base DuckDB de zéro
 rebuild:
 	uv run python -m siba.data rebuild
+
+# Reconstruire la base en retéléchargeant toutes les sources
+refresh:
+	uv run python -m siba.data rebuild --refresh
 
 # Mise à jour incrémentale de la base
 update:
